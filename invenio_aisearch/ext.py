@@ -5,22 +5,17 @@
 # invenio-aisearch is free software; you can redistribute it and/or modify it
 # under the terms of the MIT License; see LICENSE file for more details.
 
-"""Adds and AI-powered search interface to InvenioRDM."""
-
-from invenio_i18n import gettext as _
+"""Adds an AI-powered search interface to InvenioRDM."""
 
 from . import config
 
 
-class invenioaisearch(object):
+class InvenioAISearch(object):
     """invenio-aisearch extension."""
 
     def __init__(self, app=None):
         """Extension initialization."""
-        # TODO: This is an example of translation string with comment. Please
-        # remove it.
-        # NOTE: This is a note to a translator.
-        _("A translation string")
+        self.api_blueprint = None
         if app:
             self.init_app(app)
 
@@ -37,6 +32,11 @@ class invenioaisearch(object):
                 "INVENIO_AISEARCH_BASE_TEMPLATE",
                 app.config["BASE_TEMPLATE"],
             )
+        # Load all INVENIO_AISEARCH_* config variables
         for k in dir(config):
             if k.startswith("INVENIO_AISEARCH_"):
                 app.config.setdefault(k, getattr(config, k))
+
+
+# Keep backward compatibility
+invenioaisearch = InvenioAISearch

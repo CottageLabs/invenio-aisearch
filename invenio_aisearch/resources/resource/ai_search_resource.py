@@ -9,9 +9,13 @@
 
 from flask import g
 from flask_resources import Resource, resource_requestctx, response_handler, route
-from invenio_records_resources.resources.records.resource import request_data, request_view_args
-from marshmallow import ValidationError
+from flask_resources.parsers import request_parser
+from flask_resources.resources import from_conf
+from invenio_records_resources.resources.records.resource import request_data, request_search_args, request_view_args
 from werkzeug.exceptions import BadRequest
+
+# Create decorator for similar endpoint search args
+request_similar_args = request_parser(from_conf("request_similar_args"), location="args")
 
 
 class AISearchResource(Resource):
@@ -36,6 +40,7 @@ class AISearchResource(Resource):
             route("GET", self.config.routes["status"], self.status),
         ]
 
+    @request_search_args
     @response_handler()
     def search_get(self):
         """Handle GET request for AI search.
@@ -51,30 +56,31 @@ class AISearchResource(Resource):
             Search results as JSON
         """
         try:
-            # Parse query parameters using schema
-            from ..config import AISearchResourceConfig
-            schema = AISearchResourceConfig.request_search_args()
-            params = schema.load(resource_requestctx.args)
+            # Get query parameters from args (populated and validated by @request_search_args)
+            args = resource_requestctx.args or {}
 
-            # Get query (prefer 'q', fall back to 'query')
-            query = params.get('q') or params.get('query')
+            query = args.get('q') or args.get('query')
             if not query:
                 raise BadRequest("Missing required parameter: 'q' or 'query'")
+
+            # Schema already converted types, just extract values
+            limit = args.get('limit')
+            summaries = args.get('summaries', False)
+            semantic_weight = args.get('semantic_weight')
+            metadata_weight = args.get('metadata_weight')
 
             # Perform search
             result = self.service.search(
                 identity=g.identity,
                 query=query,
-                limit=params.get('limit'),
-                include_summaries=params.get('summaries', False),
-                semantic_weight=params.get('semantic_weight'),
-                metadata_weight=params.get('metadata_weight'),
+                limit=limit,
+                include_summaries=summaries,
+                semantic_weight=semantic_weight,
+                metadata_weight=metadata_weight,
             )
 
             return result.to_dict(), 200
 
-        except ValidationError as e:
-            raise BadRequest(str(e.messages))
         except ValueError as e:
             return {"error": str(e)}, 503
         except Exception as e:
@@ -118,13 +124,12 @@ class AISearchResource(Resource):
 
             return result.to_dict(), 200
 
-        except ValidationError as e:
-            raise BadRequest(str(e.messages))
         except ValueError as e:
             return {"error": str(e)}, 503
         except Exception as e:
             return {"error": "Internal server error", "message": str(e)}, 500
 
+    @request_similar_args
     @request_view_args
     @response_handler()
     def similar(self):
@@ -145,22 +150,19 @@ class AISearchResource(Resource):
             if not record_id:
                 raise BadRequest("Missing required parameter: 'record_id'")
 
-            # Parse query parameters
-            from ..config import AISearchResourceConfig
-            schema = AISearchResourceConfig.request_similar_args()
-            params = schema.load(resource_requestctx.args)
+            # Get query parameters from args (populated and validated by @request_search_args)
+            args = resource_requestctx.args or {}
+            limit = args.get('limit', 10)  # Schema sets default to 10
 
             # Find similar records
             result = self.service.similar(
                 identity=g.identity,
                 record_id=record_id,
-                limit=params.get('limit', 10),
+                limit=limit,
             )
 
             return result.to_dict(), 200
 
-        except ValidationError as e:
-            raise BadRequest(str(e.messages))
         except ValueError as e:
             return {"error": str(e)}, 404
         except Exception as e:

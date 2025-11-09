@@ -7,10 +7,11 @@
 
 """Marshmallow schemas for AI search service."""
 
+from flask_resources.parsers import MultiDictSchema
 from marshmallow import Schema, fields, validate, ValidationError, validates_schema
 
 
-class SearchRequestSchema(Schema):
+class SearchRequestSchema(MultiDictSchema):
     """Schema for search request parameters."""
 
     q = fields.Str(required=False, allow_none=True)
@@ -39,7 +40,7 @@ class SearchRequestSchema(Schema):
             raise ValidationError("Either 'q' or 'query' parameter is required")
 
 
-class SimilarRequestSchema(Schema):
+class SimilarRequestSchema(MultiDictSchema):
     """Schema for similar records request parameters."""
 
     limit = fields.Int(

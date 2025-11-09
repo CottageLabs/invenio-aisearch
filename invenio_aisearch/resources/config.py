@@ -26,7 +26,7 @@ class AISearchResourceConfig(ResourceConfig):
     """Configuration for the AI Search API resource."""
 
     blueprint_name = "ai_search_api"
-    url_prefix = "/api/aisearch"
+    url_prefix = "/aisearch"
 
     # Routes
     routes = {

@@ -61,6 +61,9 @@ regenerate_embeddings = "invenio_aisearch.jobs:RegenerateEmbeddingsJob"
 [project.entry-points."flask.commands"]
 aisearch = "invenio_aisearch.cli:aisearch"
 
+[project.entry-points."invenio_assets.webpack"]
+invenio_aisearch = "invenio_aisearch.webpack:theme"
+
 [project.entry-points."invenio_i18n.translations"]
 invenio_aisearch = "invenio_aisearch"
 

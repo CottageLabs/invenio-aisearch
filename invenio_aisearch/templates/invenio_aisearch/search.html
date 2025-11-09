@@ -1,0 +1,112 @@
+{#
+  Copyright (C) 2025 Cottage Labs.
+
+  invenio-aisearch is free software; you can redistribute it and/or modify it
+  under the terms of the MIT License; see LICENSE file for more details.
+#}
+
+{%- extends config.INVENIO_AISEARCH_BASE_TEMPLATE %}
+
+{%- block page_body %}
+<div class="ui container" style="margin-top: 2em;">
+  <h1 class="ui header">
+    <i class="brain icon"></i>
+    <div class="content">
+      AI-Powered Search
+      <div class="sub header">Natural language semantic search over the repository</div>
+    </div>
+  </h1>
+
+  <div class="ui segment">
+    <form class="ui form" id="ai-search-form">
+      <div class="field">
+        <label>Query</label>
+        <div class="ui action input">
+          <input
+            type="text"
+            id="search-query"
+            name="query"
+            placeholder="Ask a question or describe what you're looking for..."
+            autocomplete="off"
+          >
+          <button class="ui primary button" type="submit">
+            <i class="search icon"></i>
+            Search
+          </button>
+        </div>
+        <small class="text-muted">
+          Examples: "scary stories", "books about adventure at sea", "find me romantic novels"
+        </small>
+      </div>
+
+      <div class="two fields">
+        <div class="field">
+          <div class="ui checkbox">
+            <input type="checkbox" id="include-summaries" name="summaries" checked>
+            <label>Include AI summaries</label>
+          </div>
+        </div>
+        <div class="field">
+          <label>Results limit</label>
+          <input
+            type="number"
+            id="results-limit"
+            name="limit"
+            value="10"
+            min="1"
+            max="100"
+            style="width: 100px;"
+          >
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <div id="search-results-container" style="display: none;">
+    <div class="ui segment">
+      <div id="search-meta" class="ui horizontal list">
+        <div class="item">
+          <div class="content">
+            <div class="header" id="results-count">0 results</div>
+          </div>
+        </div>
+        <div class="item">
+          <div class="content">
+            <div class="ui text" id="query-info"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="ui relaxed divided items" id="search-results">
+      <!-- Results will be inserted here -->
+    </div>
+  </div>
+
+  <div id="loading-indicator" style="display: none;" class="ui segment">
+    <div class="ui active inverted dimmer">
+      <div class="ui text loader">Searching...</div>
+    </div>
+    <p style="visibility: hidden;">Loading placeholder</p>
+  </div>
+
+  <div id="error-message" style="display: none;" class="ui negative message">
+    <i class="close icon"></i>
+    <div class="header">Search Error</div>
+    <p id="error-text"></p>
+  </div>
+
+  <div id="no-results" style="display: none;" class="ui icon message">
+    <i class="search icon"></i>
+    <div class="content">
+      <div class="header">No results found</div>
+      <p>Try a different query or adjust your search terms.</p>
+    </div>
+  </div>
+</div>
+{%- endblock page_body %}
+
+{%- block javascript %}
+{{ super() }}
+{{ webpack['invenio-aisearch-search.js'] }}
+{%- endblock javascript %}

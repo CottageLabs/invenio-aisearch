@@ -5,10 +5,7 @@
 # invenio-aisearch is free software; you can redistribute it and/or modify it
 # under the terms of the MIT License; see LICENSE file for more details.
 
-"""Adds and AI-powered search interface to InvenioRDM."""
-
-# TODO: This is an example file. Remove it if you do not need it, including
-# the templates and static folders as well as the test case.
+"""Adds an AI-powered search interface to InvenioRDM."""
 
 from flask import Blueprint, render_template
 from invenio_i18n import gettext as _
@@ -21,10 +18,10 @@ blueprint = Blueprint(
 )
 
 
-@blueprint.route("/")
-def index():
-    """Render a basic view."""
+@blueprint.route("/aisearch")
+def search():
+    """Render the AI search interface."""
     return render_template(
-        "invenio_aisearch/index.html",
-        module_name=_("invenio-aisearch"),
+        "invenio_aisearch/search.html",
+        page_title=_("AI Search"),
     )

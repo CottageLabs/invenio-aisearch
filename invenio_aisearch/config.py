@@ -7,8 +7,8 @@
 
 """Configuration for AI-powered search."""
 
-INVENIO_AISEARCH_BASE_TEMPLATE = "invenio_aisearch/base.html"
-"""Default base template for the demo page."""
+INVENIO_AISEARCH_BASE_TEMPLATE = "invenio_theme/page.html"
+"""Default base template for the AI search page."""
 
 INVENIO_AISEARCH_EMBEDDINGS_FILE = None
 """Path to the embeddings JSON file.

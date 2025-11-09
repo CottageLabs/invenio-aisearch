@@ -5,8 +5,8 @@
 # invenio-aisearch is free software; you can redistribute it and/or modify it
 # under the terms of the MIT License; see LICENSE file for more details.
 
-"""Adds and AI-powered search interface to InvenioRDM."""
+"""AI Search service implementations."""
 
-from setuptools import setup
+from .ai_search_service import AISearchService
 
-setup()
+__all__ = ("AISearchService",)

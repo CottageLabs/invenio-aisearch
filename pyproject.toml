@@ -1,0 +1,74 @@
+[project]
+name = "invenio-aisearch"
+version = "0.0.1"
+description = "Adds AI-powered search interface to InvenioRDM"
+requires-python = ">=3.10"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+]
+dependencies = [
+    "torch>=2.0.0",
+    "transformers>=4.30.0",
+    "sentence-transformers>=2.2.0",
+    "numpy>=1.24.0",
+    "requests>=2.28.0",
+    "flask-resources>=1.0.0",
+    "marshmallow>=3.0.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest~=7.1",
+    "pytest-invenio~=3.0",
+    "pytest-black~=0.6.0",
+]
+
+dev = [
+    'sphinx~=8.1',
+    'ruff~=0.12',
+]
+
+[[project.authors]]
+name = "Cottage Labs"
+email = "steve@cottagelabs.com"
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project.scripts]
+
+[project.entry-points."invenio_base.apps"]
+invenio_aisearch = "invenio_aisearch.ext:InvenioAISearch"
+
+[project.entry-points."invenio_base.api_apps"]
+invenio_aisearch = "invenio_aisearch.ext:InvenioAISearch"
+
+[project.entry-points."invenio_base.blueprints"]
+invenio_aisearch = "invenio_aisearch.views:blueprint"
+
+[project.entry-points."invenio_base.api_blueprints"]
+ai_search_api = "invenio_aisearch.blueprints:create_ai_search_api_bp"
+
+[project.entry-points."invenio_celery.tasks"]
+invenio_aisearch = "invenio_aisearch.tasks"
+
+[project.entry-points."flask.commands"]
+aisearch = "invenio_aisearch.cli:aisearch"
+
+[project.entry-points."invenio_i18n.translations"]
+invenio_aisearch = "invenio_aisearch"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+exclude = ["build*", "dist*", "*.egg-info*"]
+
+
+
+
+

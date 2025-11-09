@@ -21,5 +21,5 @@ class AISearchServiceConfig:
 
     # Summary generation
     enable_summaries = True
-    summary_max_length = 50
-    summary_min_length = 10
+    summary_max_length = 150
+    summary_min_length = 50

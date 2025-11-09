@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 from flask import current_app
+from invenio_rdm_records.proxies import current_rdm_records_service
 
 from ...models import get_model_manager
 from ...query_parser import QueryParser
@@ -69,6 +70,27 @@ class AISearchService:
         current_app.logger.info(
             f"Loaded {len(self.embeddings)} embeddings from {embeddings_file}"
         )
+
+    def _fetch_record_metadata(self, identity, record_id: str) -> Optional[dict]:
+        """Fetch full record metadata from InvenioRDM.
+
+        Args:
+            identity: User identity for permission checking
+            record_id: InvenioRDM record ID
+
+        Returns:
+            Record metadata dict or None if fetch fails
+        """
+        try:
+            # Use InvenioRDM's records service to read the record
+            record = current_rdm_records_service.read(identity, record_id)
+            return record.data.get('metadata', {})
+
+        except Exception as e:
+            current_app.logger.warning(
+                f"Error fetching metadata for {record_id}: {e}"
+            )
+            return None
 
     def search(
         self,
@@ -154,19 +176,38 @@ class AISearchService:
         if include_summaries and getattr(self.config, 'enable_summaries', True):
             for result in results:
                 try:
-                    # In production, use full record text
-                    summary_text = f"A classic work titled '{result['title']}'"
-                    summary = self.model_manager.generate_summary(
-                        summary_text,
-                        max_length=getattr(self.config, 'summary_max_length', 50),
-                        min_length=getattr(self.config, 'summary_min_length', 10)
-                    )
-                    result['summary'] = summary
+                    # Fetch full record metadata
+                    metadata = self._fetch_record_metadata(identity, result['record_id'])
+
+                    if metadata and metadata.get('description'):
+                        # Use existing description if available
+                        description = metadata['description']
+
+                        # Optionally summarize long descriptions
+                        if len(description) > 500:
+                            summary = self.model_manager.generate_summary(
+                                description,
+                                max_length=getattr(self.config, 'summary_max_length', 150),
+                                min_length=getattr(self.config, 'summary_min_length', 50)
+                            )
+                            result['summary'] = summary
+                        else:
+                            # Use description as-is if it's already concise
+                            result['summary'] = description
+                    else:
+                        # Fallback: use title and subjects if no description
+                        subjects = metadata.get('subjects', []) if metadata else []
+                        subject_terms = ', '.join([s.get('subject', '') for s in subjects[:3]])
+                        if subject_terms:
+                            result['summary'] = f"{result['title']}. Subjects: {subject_terms}"
+                        else:
+                            result['summary'] = result['title']
+
                 except Exception as e:
                     current_app.logger.warning(
                         f"Failed to generate summary for {result['record_id']}: {e}"
                     )
-                    result['summary'] = None
+                    result['summary'] = result['title']
 
         return SearchResult(
             query=query,

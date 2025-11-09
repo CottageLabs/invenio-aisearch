@@ -55,6 +55,9 @@ ai_search_api = "invenio_aisearch.blueprints:create_ai_search_api_bp"
 [project.entry-points."invenio_celery.tasks"]
 invenio_aisearch = "invenio_aisearch.tasks"
 
+[project.entry-points."invenio_jobs.jobs"]
+regenerate_embeddings = "invenio_aisearch.jobs:RegenerateEmbeddingsJob"
+
 [project.entry-points."flask.commands"]
 aisearch = "invenio_aisearch.cli:aisearch"
 

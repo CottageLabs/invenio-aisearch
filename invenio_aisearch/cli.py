@@ -12,7 +12,6 @@ from flask import current_app
 from flask.cli import with_appcontext
 
 from .tasks import regenerate_all_embeddings
-from .search_service import get_search_service
 
 
 @click.group()
@@ -83,7 +82,8 @@ def status_cmd():
     click.echo(f"Embeddings file: {embeddings_file}")
 
     try:
-        service = get_search_service(embeddings_file)
+        # Get service from extension
+        service = current_app.extensions["invenio-aisearch"].search_service
 
         if service.embeddings:
             click.echo("Status: READY ✓")
@@ -134,8 +134,21 @@ def test_query_cmd(query, limit):
         return
 
     try:
-        service = get_search_service(embeddings_file)
-        results = service.search(query, limit=limit)
+        from flask import g
+        from invenio_access.permissions import system_identity
+
+        # Get service from extension
+        service = current_app.extensions["invenio-aisearch"].search_service
+
+        # Use system identity for CLI operations
+        result_obj = service.search(
+            identity=system_identity,
+            query=query,
+            limit=limit,
+        )
+
+        # Convert to dict
+        results = result_obj.to_dict()
 
         click.echo("=" * 60)
         click.echo(f"Query: \"{query}\"")

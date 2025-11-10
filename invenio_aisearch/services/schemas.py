@@ -22,16 +22,6 @@ class SearchRequestSchema(MultiDictSchema):
         validate=validate.Range(min=1, max=100)
     )
     summaries = fields.Bool(required=False, missing=False)
-    semantic_weight = fields.Float(
-        required=False,
-        allow_none=True,
-        validate=validate.Range(min=0.0, max=1.0)
-    )
-    metadata_weight = fields.Float(
-        required=False,
-        allow_none=True,
-        validate=validate.Range(min=0.0, max=1.0)
-    )
 
     @validates_schema
     def validate_query(self, data, **kwargs):

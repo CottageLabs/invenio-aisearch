@@ -15,10 +15,6 @@ class AISearchServiceConfig:
     default_limit = 10
     max_limit = 100
 
-    # Hybrid search weights
-    default_semantic_weight = 0.7
-    default_metadata_weight = 0.3
-
     # Summary generation
     enable_summaries = True
     summary_max_length = 150

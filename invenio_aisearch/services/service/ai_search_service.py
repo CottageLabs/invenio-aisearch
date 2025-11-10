@@ -127,9 +127,7 @@ class AISearchService:
                 'resource_type': resource_type_title,
                 'license': license_title,
                 'access_status': access_status,
-                'semantic_score': hit['_score'],  # k-NN score
-                'metadata_score': 0.0,  # Not used in k-NN mode
-                'hybrid_score': hit['_score'],  # Same as semantic for now
+                'similarity_score': hit['_score'],  # k-NN cosine similarity score
             }
 
             # Add summary if requested

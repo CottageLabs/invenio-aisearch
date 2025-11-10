@@ -169,20 +169,12 @@
           `;
         }
 
-        // Score labels at bottom
+        // Score label at bottom
         html += `
           <div class="extra" style="margin-top: 0.5em;">
-            <span class="ui small label">
-              <i class="chart line icon"></i>
-              Semantic: ${result.semantic_score.toFixed(3)}
-            </span>
-            <span class="ui small label">
-              <i class="tags icon"></i>
-              Metadata: ${result.metadata_score.toFixed(3)}
-            </span>
             <span class="ui small primary label">
-              <i class="star icon"></i>
-              Hybrid: ${result.hybrid_score.toFixed(3)}
+              <i class="chart line icon"></i>
+              Similarity: ${result.similarity_score.toFixed(3)}
             </span>
           </div>
         `;

@@ -10,51 +10,14 @@
 import click
 from flask import current_app
 from flask.cli import with_appcontext
-
-from .tasks import regenerate_all_embeddings
+from invenio_search import current_search_client
+from invenio_rdm_records.records.api import RDMRecord
 
 
 @click.group()
 def aisearch():
     """AI search management commands."""
     pass
-
-
-@aisearch.command("generate-embeddings")
-@click.option(
-    "--async",
-    "run_async",
-    is_flag=True,
-    help="Run as background Celery task"
-)
-@with_appcontext
-def generate_embeddings_cmd(run_async):
-    """Generate embeddings for all records.
-
-    Example:
-        invenio aisearch generate-embeddings
-        invenio aisearch generate-embeddings --async
-    """
-    if run_async:
-        click.echo("Starting embedding generation as background task...")
-        result = regenerate_all_embeddings.delay()
-        click.echo(f"Task ID: {result.id}")
-        click.echo("Use 'celery inspect active' to check task status")
-    else:
-        click.echo("Generating embeddings for all records...")
-        click.echo("This may take several minutes...")
-
-        result = regenerate_all_embeddings()
-
-        click.echo("\n" + "=" * 60)
-        click.echo("Embedding Generation Complete")
-        click.echo("=" * 60)
-        click.echo(f"Total records: {result['total_records']}")
-        click.echo(f"Embeddings generated: {result['embeddings_generated']}")
-        click.echo(f"Errors: {result['errors']}")
-        click.echo(f"File size: {result['file_size_mb']} MB")
-        click.echo(f"Saved to: {result['file_path']}")
-        click.echo("=" * 60)
 
 
 @aisearch.command("status")
@@ -65,52 +28,91 @@ def status_cmd():
     Example:
         invenio aisearch status
     """
-    embeddings_file = current_app.config.get("INVENIO_AISEARCH_EMBEDDINGS_FILE")
-
     click.echo("=" * 60)
-    click.echo("AI Search Service Status")
+    click.echo("AI Search Service Status (k-NN)")
     click.echo("=" * 60)
-
-    if not embeddings_file:
-        click.echo("Status: NOT CONFIGURED")
-        click.echo("\nConfiguration missing:")
-        click.echo("  Set INVENIO_AISEARCH_EMBEDDINGS_FILE in invenio.cfg")
-        click.echo("\nExample:")
-        click.echo("  INVENIO_AISEARCH_EMBEDDINGS_FILE = '/path/to/embeddings.json'")
-        return
-
-    click.echo(f"Embeddings file: {embeddings_file}")
 
     try:
-        # Get service from extension
-        service = current_app.extensions["invenio-aisearch"].search_service
+        # Get OpenSearch info
+        info = current_search_client.info()
+        opensearch_version = info.get('version', {}).get('number', 'unknown')
 
-        if service.embeddings:
-            click.echo("Status: READY ✓")
-            click.echo(f"Embeddings loaded: {len(service.embeddings)}")
+        click.echo(f"OpenSearch version: {opensearch_version}")
 
-            # Show API endpoints
-            api_url = current_app.config.get("INVENIO_AISEARCH_API_URL", "https://127.0.0.1:5000/api")
-            click.echo("\nAvailable endpoints:")
-            click.echo(f"  Search: {api_url}/aisearch/search?q=<query>")
-            click.echo(f"  Similar: {api_url}/aisearch/similar/<record_id>")
-            click.echo(f"  Status: {api_url}/aisearch/status")
+        # Check k-NN plugin
+        plugins_response = current_search_client.cat.plugins(format='json')
+        knn_plugin = any(p.get('component') == 'opensearch-knn' for p in plugins_response)
 
-            # Show configuration
-            click.echo("\nConfiguration:")
-            click.echo(f"  Semantic weight: {current_app.config.get('INVENIO_AISEARCH_SEMANTIC_WEIGHT', 0.7)}")
-            click.echo(f"  Metadata weight: {current_app.config.get('INVENIO_AISEARCH_METADATA_WEIGHT', 0.3)}")
-            click.echo(f"  Default limit: {current_app.config.get('INVENIO_AISEARCH_DEFAULT_LIMIT', 10)}")
+        if knn_plugin:
+            click.echo("k-NN plugin: INSTALLED ✓")
         else:
-            click.echo("Status: NO EMBEDDINGS")
-            click.echo("\nRun 'invenio aisearch generate-embeddings' to create embeddings")
+            click.echo("k-NN plugin: NOT FOUND ✗")
+            click.echo("\nWarning: k-NN plugin required for AI search")
+            return
 
-    except FileNotFoundError:
-        click.echo("Status: EMBEDDINGS FILE NOT FOUND")
-        click.echo(f"\nFile does not exist: {embeddings_file}")
-        click.echo("\nRun 'invenio aisearch generate-embeddings' to create it")
+        # Get index info
+        prefix = current_app.config.get('SEARCH_INDEX_PREFIX', '')
+        base_index_name = RDMRecord.index._name
+        index_name = f"{prefix}{base_index_name}"
+
+        # Check if index exists and has k-NN enabled
+        try:
+            index_settings = current_search_client.indices.get_settings(index=index_name)
+            first_index = list(index_settings.keys())[0]
+            knn_enabled = index_settings[first_index]['settings']['index'].get('knn') == 'true'
+
+            click.echo(f"Index: {first_index}")
+            click.echo(f"k-NN enabled: {'YES ✓' if knn_enabled else 'NO ✗'}")
+
+            # Count records with embeddings
+            count_query = {
+                "query": {
+                    "exists": {
+                        "field": "aisearch.embedding"
+                    }
+                }
+            }
+            count_response = current_search_client.count(index=index_name, body=count_query)
+            records_with_embeddings = count_response['count']
+
+            # Total records
+            total_response = current_search_client.count(index=index_name)
+            total_records = total_response['count']
+
+            click.echo(f"Records indexed: {total_records}")
+            click.echo(f"Records with embeddings: {records_with_embeddings}")
+
+            if records_with_embeddings < total_records:
+                click.echo(f"\nℹ️  {total_records - records_with_embeddings} records missing embeddings")
+                click.echo("   Run: invenio index reindex --yes-i-know -t recid")
+                click.echo("        invenio index run")
+
+        except Exception as e:
+            click.echo(f"Index error: {e}")
+
+        # Show model info
+        ext = current_app.extensions.get("invenio-aisearch")
+        if ext and ext.model_manager:
+            click.echo(f"Embedding model: {ext.model_manager.model_name}")
+            click.echo(f"Embedding dimension: {ext.model_manager.embedding_dim}")
+            click.echo("Status: READY ✓")
+        else:
+            click.echo("Status: MODEL NOT LOADED ✗")
+
+        # Show API endpoints
+        click.echo("\nAvailable endpoints:")
+        click.echo("  Search: /api/aisearch/search?q=<query>")
+        click.echo("  Similar: /api/aisearch/similar/<record_id>")
+        click.echo("  Status: /api/aisearch/status")
+
+        # Show configuration
+        click.echo("\nConfiguration:")
+        click.echo(f"  Search index prefix: {prefix}")
+        click.echo(f"  Default limit: {current_app.config.get('INVENIO_AISEARCH_DEFAULT_LIMIT', 10)}")
+        click.echo(f"  Max limit: {current_app.config.get('INVENIO_AISEARCH_MAX_LIMIT', 100)}")
+
     except Exception as e:
-        click.echo(f"Status: ERROR")
+        click.echo(f"Status: ERROR ✗")
         click.echo(f"\nError: {e}")
 
     click.echo("=" * 60)
@@ -121,30 +123,29 @@ def status_cmd():
 @click.option("--limit", default=5, help="Number of results")
 @with_appcontext
 def test_query_cmd(query, limit):
-    """Test a search query.
+    """Test a search query using k-NN semantic search.
 
     Example:
         invenio aisearch test-query "books with female protagonists"
         invenio aisearch test-query "social injustice" --limit 3
     """
-    embeddings_file = current_app.config.get("INVENIO_AISEARCH_EMBEDDINGS_FILE")
-
-    if not embeddings_file:
-        click.echo("Error: INVENIO_AISEARCH_EMBEDDINGS_FILE not configured")
-        return
-
     try:
-        from flask import g
         from invenio_access.permissions import system_identity
 
         # Get service from extension
-        service = current_app.extensions["invenio-aisearch"].search_service
+        ext = current_app.extensions.get("invenio-aisearch")
+        if not ext:
+            click.echo("Error: invenio-aisearch extension not initialized")
+            return
+
+        service = ext.search_service
 
         # Use system identity for CLI operations
         result_obj = service.search(
             identity=system_identity,
             query=query,
             limit=limit,
+            include_summaries=False,
         )
 
         # Convert to dict
@@ -153,20 +154,102 @@ def test_query_cmd(query, limit):
         click.echo("=" * 60)
         click.echo(f"Query: \"{query}\"")
         click.echo("=" * 60)
-        click.echo(f"\nIntent: {results['parsed']['intent']}")
-        click.echo(f"Attributes: {results['parsed']['attributes']}")
-        click.echo(f"Search terms: {results['parsed']['search_terms']}")
+
+        if results.get('parsed'):
+            if results['parsed'].get('intent'):
+                click.echo(f"\nIntent: {results['parsed']['intent']}")
+            if results['parsed'].get('attributes'):
+                click.echo(f"Attributes: {results['parsed']['attributes']}")
+            if results['parsed'].get('search_terms'):
+                click.echo(f"Search terms: {results['parsed']['search_terms']}")
+
         click.echo(f"\nResults ({results['total']}):")
         click.echo()
 
         for i, result in enumerate(results['results'], 1):
             click.echo(f"{i}. {result['title']}")
-            click.echo(f"   Semantic: {result['semantic_score']:.3f} | "
-                      f"Metadata: {result['metadata_score']:.3f} | "
-                      f"Hybrid: {result['hybrid_score']:.3f}")
+            click.echo(f"   ID: {result['record_id']}")
+            click.echo(f"   Similarity: {result['similarity_score']:.3f}")
+            if result.get('creators'):
+                click.echo(f"   Creators: {', '.join(result['creators'][:3])}")
             click.echo()
 
         click.echo("=" * 60)
 
     except Exception as e:
         click.echo(f"Error: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+@aisearch.command("reindex")
+@click.option(
+    "--async",
+    "run_async",
+    is_flag=True,
+    help="Run as background task (requires Celery)"
+)
+@with_appcontext
+def reindex_cmd(run_async):
+    """Reindex all records with embeddings.
+
+    This is a convenience wrapper around Invenio's built-in reindex commands.
+
+    Example:
+        invenio aisearch reindex
+        invenio aisearch reindex --async
+    """
+    import subprocess
+
+    click.echo("=" * 60)
+    click.echo("Reindexing Records with Embeddings")
+    click.echo("=" * 60)
+    click.echo()
+    click.echo("This will:")
+    click.echo("1. Queue all records for reindexing")
+    click.echo("2. Generate embeddings during indexing")
+    click.echo("3. Index records with embeddings into OpenSearch")
+    click.echo()
+
+    if not click.confirm("Continue?"):
+        click.echo("Cancelled.")
+        return
+
+    try:
+        # Run reindex command
+        click.echo("\nQueueing records for reindex...")
+        result = subprocess.run(
+            ["invenio", "index", "reindex", "--yes-i-know", "-t", "recid"],
+            capture_output=True,
+            text=True
+        )
+
+        if result.returncode != 0:
+            click.echo(f"Error: {result.stderr}")
+            return
+
+        click.echo(result.stdout)
+
+        if not run_async:
+            click.echo("\nProcessing reindex queue...")
+            result = subprocess.run(
+                ["invenio", "index", "run"],
+                capture_output=True,
+                text=True
+            )
+
+            if result.returncode != 0:
+                click.echo(f"Error: {result.stderr}")
+                return
+
+            click.echo(result.stdout)
+            click.echo("\n✓ Reindexing complete!")
+        else:
+            click.echo("\n✓ Records queued for reindexing")
+            click.echo("Celery workers will process the queue in the background.")
+            click.echo("Run 'invenio aisearch status' to check progress.")
+
+    except Exception as e:
+        click.echo(f"Error: {e}")
+
+    click.echo("=" * 60)

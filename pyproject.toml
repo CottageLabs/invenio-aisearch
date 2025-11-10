@@ -1,6 +1,6 @@
 [project]
 name = "invenio-aisearch"
-version = "0.0.1"
+version = "0.0.2"
 description = "Adds AI-powered search interface to InvenioRDM"
 requires-python = ">=3.10"
 classifiers = [

@@ -49,8 +49,6 @@ class AISearchResource(Resource):
             q or query: Natural language query string
             limit: Maximum number of results
             summaries: Whether to include AI summaries (true/false)
-            semantic_weight: Weight for semantic similarity (0-1)
-            metadata_weight: Weight for metadata matching (0-1)
 
         Returns:
             Search results as JSON
@@ -66,17 +64,13 @@ class AISearchResource(Resource):
             # Schema already converted types, just extract values
             limit = args.get('limit')
             summaries = args.get('summaries', False)
-            semantic_weight = args.get('semantic_weight')
-            metadata_weight = args.get('metadata_weight')
 
-            # Perform search
+            # Perform search using OpenSearch k-NN
             result = self.service.search(
                 identity=g.identity,
                 query=query,
                 limit=limit,
                 include_summaries=summaries,
-                semantic_weight=semantic_weight,
-                metadata_weight=metadata_weight,
             )
 
             return result.to_dict(), 200
@@ -95,8 +89,6 @@ class AISearchResource(Resource):
             q or query: Natural language query string
             limit: Maximum number of results
             summaries: Whether to include AI summaries
-            semantic_weight: Weight for semantic similarity (0-1)
-            metadata_weight: Weight for metadata matching (0-1)
 
         Returns:
             Search results as JSON
@@ -112,14 +104,12 @@ class AISearchResource(Resource):
             if not query:
                 raise BadRequest("Missing required parameter: 'q' or 'query'")
 
-            # Perform search
+            # Perform search using OpenSearch k-NN
             result = self.service.search(
                 identity=g.identity,
                 query=query,
                 limit=data.get('limit'),
                 include_summaries=data.get('summaries', False),
-                semantic_weight=data.get('semantic_weight'),
-                metadata_weight=data.get('metadata_weight'),
             )
 
             return result.to_dict(), 200
@@ -176,7 +166,7 @@ class AISearchResource(Resource):
             Service status as JSON
         """
         try:
-            result = self.service.status(identity=g.identity)
+            result = self.service.status()
             return result.to_dict(), 200
 
         except Exception as e:

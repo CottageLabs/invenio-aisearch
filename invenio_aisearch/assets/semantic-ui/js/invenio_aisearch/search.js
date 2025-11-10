@@ -120,16 +120,47 @@
         const item = document.createElement('div');
         item.className = 'item';
 
-        let html = `
-          <div class="content">
-            <div class="header">
-              <a href="/records/${result.record_id}">${escapeHtml(result.title)}</a>
-            </div>
-            <div class="meta">
-              <span>Record ID: ${result.record_id}</span>
-            </div>
+        let html = '<div class="content">';
+
+        // Labels at top (publication date, resource type, license/access)
+        html += '<div class="extra" style="margin-bottom: 0.5em;">';
+
+        // Publication date
+        if (result.publication_date) {
+          html += `<span class="ui tiny label">${escapeHtml(result.publication_date)}</span> `;
+        }
+
+        // Resource type
+        if (result.resource_type) {
+          html += `<span class="ui tiny label">${escapeHtml(result.resource_type)}</span> `;
+        }
+
+        // License / Access
+        if (result.license) {
+          html += `<span class="ui tiny green label">${escapeHtml(result.license)}</span> `;
+        } else if (result.access_status === 'public') {
+          html += '<span class="ui tiny green label">Open</span> ';
+        } else if (result.access_status === 'restricted') {
+          html += '<span class="ui tiny orange label">Restricted</span> ';
+        }
+
+        html += '</div>';
+
+        // Title
+        html += `
+          <div class="header">
+            <a href="/records/${result.record_id}">${escapeHtml(result.title)}</a>
+          </div>
         `;
 
+        // Authors
+        if (result.creators && result.creators.length > 0) {
+          const authors = result.creators.slice(0, 3).map(escapeHtml).join('; ');
+          const moreAuthors = result.creators.length > 3 ? ` (+${result.creators.length - 3} more)` : '';
+          html += `<div class="meta">${authors}${moreAuthors}</div>`;
+        }
+
+        // Summary/Description
         if (result.summary) {
           html += `
             <div class="description" style="margin-top: 0.5em;">
@@ -138,23 +169,25 @@
           `;
         }
 
+        // Score labels at bottom
         html += `
-            <div class="extra" style="margin-top: 0.5em;">
-              <span class="ui small label">
-                <i class="chart line icon"></i>
-                Semantic: ${result.semantic_score.toFixed(3)}
-              </span>
-              <span class="ui small label">
-                <i class="tags icon"></i>
-                Metadata: ${result.metadata_score.toFixed(3)}
-              </span>
-              <span class="ui small primary label">
-                <i class="star icon"></i>
-                Hybrid: ${result.hybrid_score.toFixed(3)}
-              </span>
-            </div>
+          <div class="extra" style="margin-top: 0.5em;">
+            <span class="ui small label">
+              <i class="chart line icon"></i>
+              Semantic: ${result.semantic_score.toFixed(3)}
+            </span>
+            <span class="ui small label">
+              <i class="tags icon"></i>
+              Metadata: ${result.metadata_score.toFixed(3)}
+            </span>
+            <span class="ui small primary label">
+              <i class="star icon"></i>
+              Hybrid: ${result.hybrid_score.toFixed(3)}
+            </span>
           </div>
         `;
+
+        html += '</div>';
 
         item.innerHTML = html;
         resultsDiv.appendChild(item);

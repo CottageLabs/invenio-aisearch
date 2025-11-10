@@ -67,6 +67,9 @@ invenio_aisearch = "invenio_aisearch.webpack:theme"
 [project.entry-points."invenio_i18n.translations"]
 invenio_aisearch = "invenio_aisearch"
 
+[project.entry-points."invenio_search.index_templates"]
+rdmrecords_knn = "invenio_aisearch.index_templates"
+
 [tool.setuptools]
 include-package-data = true
 

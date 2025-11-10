@@ -1,0 +1,33 @@
+{
+  "index_patterns": ["__SEARCH_INDEX_PREFIX__rdmrecords-records-record*"],
+  "priority": 100,
+  "template": {
+    "settings": {
+      "index": {
+        "knn": true
+      }
+    },
+    "mappings": {
+      "properties": {
+        "aisearch": {
+          "type": "object",
+          "properties": {
+            "embedding": {
+              "type": "knn_vector",
+              "dimension": 384,
+              "method": {
+                "name": "hnsw",
+                "space_type": "cosinesimil",
+                "engine": "nmslib",
+                "parameters": {
+                  "ef_construction": 128,
+                  "m": 24
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

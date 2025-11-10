@@ -121,25 +121,39 @@ class StatusResult:
     def __init__(
         self,
         status: str,
-        embeddings_loaded: bool,
-        embeddings_count: int,
+        model_loaded: bool = False,
+        opensearch_version: Optional[str] = None,
+        knn_plugin_available: bool = False,
+        error: Optional[str] = None,
+        # Legacy parameters for backward compatibility
+        embeddings_loaded: bool = None,
+        embeddings_count: int = None,
         embeddings_file: Optional[str] = None,
         message: Optional[str] = None,
     ):
         """Initialize status result.
 
         Args:
-            status: Status string (ready, not_configured, no_embeddings, error)
-            embeddings_loaded: Whether embeddings are loaded
-            embeddings_count: Number of embeddings loaded
-            embeddings_file: Path to embeddings file
+            status: Status string (ready, error)
+            model_loaded: Whether the embedding model is loaded
+            opensearch_version: OpenSearch version string
+            knn_plugin_available: Whether k-NN plugin is available
+            error: Error message if status is error
+            embeddings_loaded: (Legacy) Whether embeddings are loaded
+            embeddings_count: (Legacy) Number of embeddings loaded
+            embeddings_file: (Legacy) Path to embeddings file
             message: Optional status message
         """
         self._status = status
-        self._embeddings_loaded = embeddings_loaded
-        self._embeddings_count = embeddings_count
+        self._model_loaded = model_loaded
+        self._opensearch_version = opensearch_version
+        self._knn_plugin_available = knn_plugin_available
+        self._error = error
+        # Legacy fields
+        self._embeddings_loaded = embeddings_loaded if embeddings_loaded is not None else model_loaded
+        self._embeddings_count = embeddings_count or 0
         self._embeddings_file = embeddings_file
-        self._message = message
+        self._message = message or error
 
     @property
     def status(self) -> str:
@@ -147,18 +161,38 @@ class StatusResult:
         return self._status
 
     @property
+    def model_loaded(self) -> bool:
+        """Check if model is loaded."""
+        return self._model_loaded
+
+    @property
+    def opensearch_version(self) -> Optional[str]:
+        """Get OpenSearch version."""
+        return self._opensearch_version
+
+    @property
+    def knn_plugin_available(self) -> bool:
+        """Check if k-NN plugin is available."""
+        return self._knn_plugin_available
+
+    @property
+    def error(self) -> Optional[str]:
+        """Get error message."""
+        return self._error
+
+    @property
     def embeddings_loaded(self) -> bool:
-        """Check if embeddings are loaded."""
+        """Check if embeddings are loaded (legacy)."""
         return self._embeddings_loaded
 
     @property
     def embeddings_count(self) -> int:
-        """Get embeddings count."""
+        """Get embeddings count (legacy)."""
         return self._embeddings_count
 
     @property
     def embeddings_file(self) -> Optional[str]:
-        """Get embeddings file path."""
+        """Get embeddings file path (legacy)."""
         return self._embeddings_file
 
     @property
@@ -174,11 +208,14 @@ class StatusResult:
         """
         result = {
             "status": self._status,
-            "embeddings_loaded": self._embeddings_loaded,
-            "embeddings_count": self._embeddings_count,
+            "model_loaded": self._model_loaded,
         }
-        if self._embeddings_file:
-            result["embeddings_file"] = self._embeddings_file
+        if self._opensearch_version:
+            result["opensearch_version"] = self._opensearch_version
+        if self._knn_plugin_available:
+            result["knn_plugin_available"] = self._knn_plugin_available
+        if self._error:
+            result["error"] = self._error
         if self._message:
             result["message"] = self._message
         return result

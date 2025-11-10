@@ -13,7 +13,7 @@ from invenio_rdm_records.records.api import RDMRecord
 
 from ...models import get_model_manager
 from ...query_parser import QueryParser
-from ..results import SearchResult, StatusResult
+from ..results import SearchResult, SimilarResult, StatusResult
 
 
 class AISearchService:
@@ -120,7 +120,7 @@ class AISearchService:
 
             # Build result item
             result = {
-                'record_id': hit['_id'],
+                'record_id': source.get('id'),  # Use PID, not internal UUID
                 'title': metadata.get('title', 'Untitled'),
                 'creators': creator_names,
                 'publication_date': metadata.get('publication_date', ''),
@@ -160,7 +160,7 @@ class AISearchService:
         )
 
     def similar(self, identity, record_id: str, limit: int = 10):
-        """Find similar records to a given record.
+        """Find similar records to a given record using k-NN.
 
         Args:
             identity: User identity for access control
@@ -170,8 +170,136 @@ class AISearchService:
         Returns:
             SimilarResult object with similar records
         """
-        # TODO: Implement using OpenSearch More Like This or k-NN
-        raise NotImplementedError("Similar records search not yet implemented with k-NN")
+        # Get index name from RDM records with prefix
+        prefix = current_app.config.get('SEARCH_INDEX_PREFIX', '')
+        base_index_name = RDMRecord.index._name
+        index_name = f"{prefix}{base_index_name}"
+
+        # Fetch the source record to get its embedding
+        try:
+            # Search for the record by its PID
+            search_response = current_search_client.search(
+                index=index_name,
+                body={
+                    "query": {"term": {"id": record_id}},
+                    "size": 1,
+                    "_source": ["aisearch.embedding", "metadata.title"]
+                }
+            )
+
+            if not search_response['hits']['hits']:
+                current_app.logger.error(f"Record {record_id} not found in index")
+                return SimilarResult(
+                    record_id=record_id,
+                    similar=[],
+                    total=0,
+                )
+
+            source_hit = search_response['hits']['hits'][0]
+            source_embedding = source_hit['_source'].get('aisearch', {}).get('embedding')
+
+            if not source_embedding:
+                current_app.logger.error(f"Record {record_id} has no embedding")
+                return SimilarResult(
+                    record_id=record_id,
+                    similar=[],
+                    total=0,
+                )
+
+        except Exception as e:
+            current_app.logger.error(f"Failed to fetch source record {record_id}: {e}")
+            return SimilarResult(
+                record_id=record_id,
+                similar=[],
+                total=0,
+            )
+
+        # Build k-NN query to find similar records
+        # Request limit+1 to account for the source record in results
+        search_body = {
+            "size": limit + 1,
+            "query": {
+                "knn": {
+                    "aisearch.embedding": {
+                        "vector": source_embedding,
+                        "k": limit + 1
+                    }
+                }
+            },
+            "_source": {
+                "excludes": ["aisearch.embedding"]
+            }
+        }
+
+        # Execute search
+        try:
+            response = current_search_client.search(
+                index=index_name,
+                body=search_body
+            )
+        except Exception as e:
+            current_app.logger.error(f"k-NN similar query failed: {e}")
+            return SimilarResult(
+                record_id=record_id,
+                similar=[],
+                total=0,
+            )
+
+        # Parse results, excluding the source record
+        similar_records = []
+        for hit in response['hits']['hits']:
+            source = hit['_source']
+
+            # Skip the source record itself
+            if source.get('id') == record_id:
+                continue
+
+            metadata = source.get('metadata', {})
+
+            # Extract creators
+            creators = metadata.get('creators', [])
+            creator_names = [
+                creator.get('person_or_org', {}).get('name', 'Unknown')
+                for creator in creators
+            ]
+
+            # Extract resource type
+            resource_type = metadata.get('resource_type', {})
+            resource_type_title = resource_type.get('title', {}).get('en', 'Unknown')
+
+            # Extract rights/license
+            rights = metadata.get('rights', [])
+            license_title = None
+            if rights:
+                license_title = rights[0].get('title', {}).get('en')
+
+            # Extract access status
+            access = source.get('access', {})
+            access_status = access.get('record', 'restricted')
+
+            # Build result item
+            result = {
+                'record_id': source.get('id'),
+                'title': metadata.get('title', 'Untitled'),
+                'creators': creator_names,
+                'publication_date': metadata.get('publication_date', ''),
+                'resource_type': resource_type_title,
+                'license': license_title,
+                'access_status': access_status,
+                'similarity_score': hit['_score'],
+            }
+
+            similar_records.append(result)
+
+            # Stop once we have enough results
+            if len(similar_records) >= limit:
+                break
+
+        return SimilarResult(
+            record_id=record_id,
+            similar=similar_records,
+            total=len(similar_records),
+        )
 
     def status(self):
         """Get service status.

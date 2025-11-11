@@ -19,6 +19,8 @@ class SearchResult:
         parsed: Dict,
         results: List[Dict],
         total: int,
+        passages: Optional[List[Dict]] = None,
+        passage_total: int = 0,
     ):
         """Initialize search result.
 
@@ -27,11 +29,15 @@ class SearchResult:
             parsed: Parsed query components
             results: List of search results
             total: Total number of results
+            passages: Optional list of passage-level results
+            passage_total: Total number of passages
         """
         self._query = query
         self._parsed = parsed
         self._results = results
         self._total = total
+        self._passages = passages or []
+        self._passage_total = passage_total
 
     @property
     def query(self) -> str:
@@ -53,18 +59,35 @@ class SearchResult:
         """Get total number of results."""
         return self._total
 
+    @property
+    def passages(self) -> List[Dict]:
+        """Get passage results."""
+        return self._passages
+
+    @property
+    def passage_total(self) -> int:
+        """Get total number of passages."""
+        return self._passage_total
+
     def to_dict(self) -> Dict:
         """Convert to dictionary representation.
 
         Returns:
             Dictionary with search results and metadata
         """
-        return {
+        result = {
             "query": self._query,
             "parsed": self._parsed,
             "results": self._results,
             "total": self._total,
         }
+
+        # Include passages if available
+        if self._passages:
+            result["passages"] = self._passages
+            result["passage_total"] = self._passage_total
+
+        return result
 
 
 class SimilarResult:

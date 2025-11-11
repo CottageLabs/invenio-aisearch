@@ -29,7 +29,7 @@ class AISearchService:
         self.query_parser = QueryParser()
         self.model_manager = get_model_manager()
 
-    def search(self, identity, query: str, limit: int = None, include_summaries: bool = True):
+    def search(self, identity, query: str, limit: int = None, include_summaries: bool = True, include_passages: bool = None):
         """Search records using AI-powered semantic search with OpenSearch k-NN.
 
         Args:
@@ -37,14 +37,15 @@ class AISearchService:
             query: Natural language search query
             limit: Maximum number of results (default from config)
             include_summaries: Whether to include AI-generated summaries
+            include_passages: Whether to include passage-level results (default: from config)
 
         Returns:
-            SearchResult object with matching records
+            SearchResult object with matching records and optionally passages
         """
         # Parse query
         parsed = self.query_parser.parse(query)
 
-        # Generate query embedding
+        # Generate query embedding (used for both book and passage search)
         query_embedding = self.model_manager.generate_embedding(query)
 
         # Determine limit
@@ -150,11 +151,79 @@ class AISearchService:
 
             results.append(result)
 
+        # Optionally include passage-level results
+        passages = []
+        passage_total = 0
+
+        # Determine if we should include passages
+        should_include_passages = include_passages if include_passages is not None else current_app.config.get('INVENIO_AISEARCH_CHUNKS_ENABLED', False)
+
+        if should_include_passages:
+            try:
+                # Get chunks index name
+                chunks_index = current_app.config.get('INVENIO_AISEARCH_CHUNKS_INDEX', 'document-chunks-v1')
+
+                # Limit passages to a reasonable number (max 5 per query)
+                passage_limit = min(5, result_limit)
+
+                # Build OpenSearch k-NN query for chunks
+                chunks_search_body = {
+                    "size": passage_limit,
+                    "query": {
+                        "knn": {
+                            "embedding": {
+                                "vector": query_embedding.tolist(),
+                                "k": passage_limit
+                            }
+                        }
+                    },
+                    "_source": {
+                        "excludes": ["embedding"]  # Don't return the embedding vector
+                    }
+                }
+
+                # Execute passage search
+                chunks_response = current_search_client.search(
+                    index=chunks_index,
+                    body=chunks_search_body
+                )
+
+                # Parse passage results
+                for hit in chunks_response['hits']['hits']:
+                    source = hit['_source']
+
+                    passage = {
+                        'chunk_id': source.get('chunk_id'),
+                        'record_id': source.get('record_id'),
+                        'title': source.get('title', 'Untitled'),
+                        'creators': source.get('creators', 'Unknown'),
+                        'text': source.get('text', ''),
+                        'chunk_index': source.get('chunk_index', 0),
+                        'chunk_count': source.get('chunk_count', 0),
+                        'word_count': source.get('word_count', 0),
+                        'char_start': source.get('char_start', 0),
+                        'char_end': source.get('char_end', 0),
+                        'similarity_score': hit['_score'],  # k-NN similarity score
+                    }
+
+                    passages.append(passage)
+
+                passage_total = len(passages)
+
+            except Exception as e:
+                current_app.logger.error(f"Passage search failed: {e}")
+                # Don't fail the whole search if passages fail
+                passages = []
+                passage_total = 0
+
+        # Return results with passages if available
         return SearchResult(
             query=query,
             parsed=parsed,
             results=results,
             total=len(results),
+            passages=passages,
+            passage_total=passage_total,
         )
 
     def similar(self, identity, record_id: str, limit: int = 10):

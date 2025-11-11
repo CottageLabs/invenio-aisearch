@@ -104,7 +104,11 @@
 
     function displayResults(data) {
       // Update meta info
-      resultsCount.textContent = `${data.total} result${data.total !== 1 ? 's' : ''}`;
+      let countText = `${data.total} book result${data.total !== 1 ? 's' : ''}`;
+      if (data.passages && data.passage_total > 0) {
+        countText += `, ${data.passage_total} passage${data.passage_total !== 1 ? 's' : ''}`;
+      }
+      resultsCount.textContent = countText;
 
       let queryInfoText = `Query: "${data.query}"`;
       if (data.parsed && data.parsed.intent) {
@@ -115,75 +119,243 @@
       // Clear previous results
       resultsDiv.innerHTML = '';
 
-      // Render each result
-      data.results.forEach((result, index) => {
-        const item = document.createElement('div');
-        item.className = 'item';
+      // Group passages by record_id
+      const passagesByRecord = {};
+      if (data.passages && data.passages.length > 0) {
+        data.passages.forEach(passage => {
+          if (!passagesByRecord[passage.record_id]) {
+            passagesByRecord[passage.record_id] = [];
+          }
+          passagesByRecord[passage.record_id].push(passage);
+        });
+      }
 
-        let html = '<div class="content">';
+      // Track which books we've displayed
+      const displayedRecords = new Set();
 
-        // Labels at top (publication date, resource type, license/access)
-        html += '<div class="extra" style="margin-bottom: 0.5em;">';
+      // Render book results with their passages
+      if (data.results && data.results.length > 0) {
+        const bookHeader = document.createElement('h3');
+        bookHeader.className = 'ui dividing header';
+        bookHeader.innerHTML = '<i class="book icon"></i> Results';
+        resultsDiv.appendChild(bookHeader);
 
-        // Publication date
-        if (result.publication_date) {
-          html += `<span class="ui tiny label">${escapeHtml(result.publication_date)}</span> `;
-        }
+        data.results.forEach((result, index) => {
+          displayedRecords.add(result.record_id);
 
-        // Resource type
-        if (result.resource_type) {
-          html += `<span class="ui tiny label">${escapeHtml(result.resource_type)}</span> `;
-        }
+          const item = document.createElement('div');
+          item.className = 'item';
 
-        // License / Access
-        if (result.license) {
-          html += `<span class="ui tiny green label">${escapeHtml(result.license)}</span> `;
-        } else if (result.access_status === 'public') {
-          html += '<span class="ui tiny green label">Open</span> ';
-        } else if (result.access_status === 'restricted') {
-          html += '<span class="ui tiny orange label">Restricted</span> ';
-        }
+          let html = '<div class="content">';
 
-        html += '</div>';
+          // Labels at top (publication date, resource type, license/access)
+          html += '<div class="extra" style="margin-bottom: 0.5em;">';
 
-        // Title
-        html += `
-          <div class="header">
-            <a href="/records/${result.record_id}">${escapeHtml(result.title)}</a>
-          </div>
-        `;
+          // Publication date
+          if (result.publication_date) {
+            html += `<span class="ui tiny label">${escapeHtml(result.publication_date)}</span> `;
+          }
 
-        // Authors
-        if (result.creators && result.creators.length > 0) {
-          const authors = result.creators.slice(0, 3).map(escapeHtml).join('; ');
-          const moreAuthors = result.creators.length > 3 ? ` (+${result.creators.length - 3} more)` : '';
-          html += `<div class="meta">${authors}${moreAuthors}</div>`;
-        }
+          // Resource type
+          if (result.resource_type) {
+            html += `<span class="ui tiny label">${escapeHtml(result.resource_type)}</span> `;
+          }
 
-        // Summary/Description
-        if (result.summary) {
+          // License / Access
+          if (result.license) {
+            html += `<span class="ui tiny green label">${escapeHtml(result.license)}</span> `;
+          } else if (result.access_status === 'public') {
+            html += '<span class="ui tiny green label">Open</span> ';
+          } else if (result.access_status === 'restricted') {
+            html += '<span class="ui tiny orange label">Restricted</span> ';
+          }
+
+          html += '</div>';
+
+          // Title
           html += `
-            <div class="description" style="margin-top: 0.5em;">
-              ${escapeHtml(result.summary)}
+            <div class="header">
+              <a href="/records/${result.record_id}">${escapeHtml(result.title)}</a>
             </div>
           `;
+
+          // Authors
+          if (result.creators && result.creators.length > 0) {
+            const authors = result.creators.slice(0, 3).map(escapeHtml).join('; ');
+            const moreAuthors = result.creators.length > 3 ? ` (+${result.creators.length - 3} more)` : '';
+            html += `<div class="meta">${authors}${moreAuthors}</div>`;
+          }
+
+          // Summary/Description
+          if (result.summary) {
+            html += `
+              <div class="description" style="margin-top: 0.5em;">
+                ${escapeHtml(result.summary)}
+              </div>
+            `;
+          }
+
+          // Score label
+          html += `
+            <div class="extra" style="margin-top: 0.5em;">
+              <span class="ui small primary label">
+                <i class="chart line icon"></i>
+                Book similarity: ${result.similarity_score.toFixed(3)}
+              </span>
+            </div>
+          `;
+
+          // Add matching passages for this book (if any)
+          if (passagesByRecord[result.record_id]) {
+            const passages = passagesByRecord[result.record_id];
+
+            html += `
+              <div style="margin-top: 1em; padding-top: 1em; border-top: 1px solid #e0e0e0;">
+                <div style="margin-bottom: 0.5em;">
+                  <strong><i class="file alternate outline icon"></i> Matching passage${passages.length > 1 ? 's' : ''} from this book:</strong>
+                </div>
+            `;
+
+            passages.forEach((passage, pIdx) => {
+              const chunkPosition = `Chunk ${passage.chunk_index + 1} of ${passage.chunk_count}`;
+              const wordCount = `${passage.word_count} words`;
+
+              html += `
+                <div style="margin-top: ${pIdx > 0 ? '1em' : '0.5em'};">
+                  <div style="margin-bottom: 0.5em;">
+                    <span class="ui tiny label">
+                      <i class="file alternate outline icon"></i>
+                      ${chunkPosition}
+                    </span>
+                    <span class="ui tiny label">
+                      <i class="font icon"></i>
+                      ${wordCount}
+                    </span>
+                    <span class="ui tiny teal label">
+                      <i class="chart line icon"></i>
+                      Passage similarity: ${passage.similarity_score.toFixed(3)}
+                    </span>
+                  </div>
+                  <div style="padding: 1em; background-color: #f9fafb; border-left: 3px solid #00b5ad; font-family: Georgia, serif; line-height: 1.8; text-align: justify;">
+                    ${escapeHtml(truncateText(passage.text, 600))}
+                  </div>
+                </div>
+              `;
+            });
+
+            html += '</div>';
+          }
+
+          html += '</div>';
+
+          item.innerHTML = html;
+          resultsDiv.appendChild(item);
+        });
+      }
+
+      // Render passages from books that didn't appear in top results
+      const orphanPassages = [];
+      for (const recordId in passagesByRecord) {
+        if (!displayedRecords.has(recordId)) {
+          orphanPassages.push(...passagesByRecord[recordId]);
         }
+      }
 
-        // Score label at bottom
-        html += `
-          <div class="extra" style="margin-top: 0.5em;">
-            <span class="ui small primary label">
-              <i class="chart line icon"></i>
-              Similarity: ${result.similarity_score.toFixed(3)}
-            </span>
-          </div>
-        `;
+      if (orphanPassages.length > 0) {
+        const orphanHeader = document.createElement('h3');
+        orphanHeader.className = 'ui dividing header';
+        orphanHeader.style.marginTop = '2em';
+        orphanHeader.innerHTML = '<i class="file alternate outline icon"></i> Other Relevant Passages';
+        resultsDiv.appendChild(orphanHeader);
 
-        html += '</div>';
+        orphanPassages.forEach((passage, index) => {
+          const item = document.createElement('div');
+          item.className = 'item';
 
-        item.innerHTML = html;
-        resultsDiv.appendChild(item);
-      });
+          let html = '<div class="content">';
+
+          // Header with book title and link
+          html += `
+            <div class="header">
+              <a href="/records/${passage.record_id}">${escapeHtml(passage.title)}</a>
+            </div>
+          `;
+
+          // Author
+          if (passage.creators) {
+            html += `<div class="meta">${escapeHtml(passage.creators)}</div>`;
+          }
+
+          // Chunk position info
+          const chunkPosition = `Chunk ${passage.chunk_index + 1} of ${passage.chunk_count}`;
+          const wordCount = `${passage.word_count} words`;
+          html += `
+            <div class="meta" style="margin-top: 0.5em;">
+              <span class="ui tiny label">
+                <i class="file alternate outline icon"></i>
+                ${chunkPosition}
+              </span>
+              <span class="ui tiny label">
+                <i class="font icon"></i>
+                ${wordCount}
+              </span>
+              <span class="ui tiny teal label">
+                <i class="chart line icon"></i>
+                Similarity: ${passage.similarity_score.toFixed(3)}
+              </span>
+            </div>
+          `;
+
+          // Passage text
+          html += `
+            <div class="description" style="display: block !important; margin-top: 1em; padding: 1em; background-color: #f9fafb; border-left: 3px solid #00b5ad; font-family: Georgia, serif; line-height: 1.8; text-align: justify;">
+              ${escapeHtml(truncateText(passage.text, 600))}
+            </div>
+          `;
+
+          // Action buttons at bottom
+          html += `
+            <div class="extra" style="margin-top: 0.5em;">
+              <a href="/records/${passage.record_id}" class="ui small button">
+                <i class="book icon"></i>
+                View Full Record
+              </a>
+            </div>
+          `;
+
+          html += '</div>';
+
+          item.innerHTML = html;
+          resultsDiv.appendChild(item);
+        });
+      }
+    }
+
+    function truncateText(text, maxLength) {
+      // Don't truncate if text is short (under 400 words ≈ 2000 chars)
+      // This ensures small chunks are shown in full
+      if (text.length <= 2000) {
+        return text;
+      }
+
+      if (text.length <= maxLength) {
+        return text;
+      }
+
+      // Try to truncate at a sentence boundary
+      const truncated = text.substring(0, maxLength);
+      const lastPeriod = truncated.lastIndexOf('.');
+      const lastQuestion = truncated.lastIndexOf('?');
+      const lastExclamation = truncated.lastIndexOf('!');
+      const lastSentence = Math.max(lastPeriod, lastQuestion, lastExclamation);
+
+      if (lastSentence > maxLength * 0.7) {
+        return truncated.substring(0, lastSentence + 1) + '...';
+      }
+
+      // Otherwise truncate at last space
+      const lastSpace = truncated.lastIndexOf(' ');
+      return truncated.substring(0, lastSpace) + '...';
     }
 
     function escapeHtml(text) {

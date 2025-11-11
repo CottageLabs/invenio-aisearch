@@ -10,16 +10,13 @@
 import click
 import json
 import re
-import requests
-import urllib3
 from pathlib import Path
 from flask import current_app
 from flask.cli import with_appcontext
 from invenio_search import current_search_client
 from invenio_rdm_records.records.api import RDMRecord
-
-# Disable SSL warnings for self-signed certs
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+from invenio_rdm_records.proxies import current_rdm_records_service
+from invenio_access.permissions import system_identity
 
 
 @click.group()
@@ -445,7 +442,7 @@ def chunks_status_cmd():
 
 
 @aisearch.command("generate-chunk-embeddings")
-@click.argument("chunks_file")
+@click.argument("chunks_file", required=False)
 @click.option("--batch-size", default=100, help="Number of chunks to process per batch")
 @click.option("--async", "run_async", is_flag=True, help="Run as background Celery task")
 @with_appcontext
@@ -455,15 +452,29 @@ def generate_chunk_embeddings_cmd(chunks_file, batch_size, run_async):
     This command reads chunks from a JSONL file, generates embeddings using
     the AI model, and indexes them into OpenSearch for full-text search.
 
+    If no chunks file is specified, uses the default from configuration.
+
     Example:
-        invenio aisearch generate-chunk-embeddings book_chunks.jsonl
+        invenio aisearch generate-chunk-embeddings
         invenio aisearch generate-chunk-embeddings book_chunks.jsonl --batch-size 50 --async
     """
     from pathlib import Path
 
-    chunks_path = Path(chunks_file)
+    # Get configuration for default path
+    if chunks_file is None:
+        data_dir = current_app.config.get('INVENIO_AISEARCH_DATA_DIR', 'aisearch_data')
+        chunks_filename = current_app.config.get('INVENIO_AISEARCH_CHUNKS_FILE', 'document_chunks.jsonl')
+
+        # Build default path
+        if Path(data_dir).is_absolute():
+            chunks_path = Path(data_dir) / chunks_filename
+        else:
+            chunks_path = Path(data_dir) / chunks_filename
+    else:
+        chunks_path = Path(chunks_file)
+
     if not chunks_path.exists():
-        click.echo(f"✗ File not found: {chunks_file}")
+        click.echo(f"✗ File not found: {chunks_path}")
         return
 
     # Count total chunks
@@ -473,7 +484,7 @@ def generate_chunk_embeddings_cmd(chunks_file, batch_size, run_async):
     click.echo("=" * 60)
     click.echo("Generate Document Chunk Embeddings")
     click.echo("=" * 60)
-    click.echo(f"Chunks file: {chunks_file}")
+    click.echo(f"Chunks file: {chunks_path}")
     click.echo(f"Total chunks: {total_chunks:,}")
     click.echo(f"Batch size: {batch_size}")
     click.echo(f"Mode: {'Async (Celery)' if run_async else 'Synchronous'}")
@@ -562,10 +573,9 @@ def generate_chunk_embeddings_cmd(chunks_file, batch_size, run_async):
 
 
 @aisearch.command("chunk-documents")
-@click.option("--output", "-o", default="book_chunks.jsonl", help="Output JSONL file")
-@click.option("--base-url", default=None, help="InvenioRDM base URL (default: from app config)")
+@click.option("--output", "-o", default=None, help="Output JSONL file path (default: from config)")
 @with_appcontext
-def chunk_documents_cmd(output, base_url):
+def chunk_documents_cmd(output):
     """Chunk documents into passages for full-text search.
 
     Downloads documents from InvenioRDM records and creates searchable chunks
@@ -573,38 +583,62 @@ def chunk_documents_cmd(output, base_url):
 
     Example:
         invenio aisearch chunk-documents
-        invenio aisearch chunk-documents --output my_chunks.jsonl
+        invenio aisearch chunk-documents --output /path/to/custom_chunks.jsonl
     """
     # Get configuration
     chunk_size = current_app.config.get('INVENIO_AISEARCH_CHUNK_SIZE', 600)
     chunk_overlap = current_app.config.get('INVENIO_AISEARCH_CHUNK_OVERLAP', 150)
+    data_dir = current_app.config.get('INVENIO_AISEARCH_DATA_DIR', 'gutenberg_data')
+    chunks_file = current_app.config.get('INVENIO_AISEARCH_CHUNKS_FILE', 'book_chunks.jsonl')
 
-    if base_url is None:
-        base_url = current_app.config.get('SITE_UI_URL', 'https://127.0.0.1:5000')
+    # Determine output path
+    if output is None:
+        # Build default path: data_dir/chunks_file
+        if Path(data_dir).is_absolute():
+            output_path = Path(data_dir) / chunks_file
+        else:
+            # Relative to current working directory (typically instance root)
+            output_path = Path(data_dir) / chunks_file
+    else:
+        output_path = Path(output)
+
+    # Ensure output directory exists
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     click.echo("=" * 60)
     click.echo("Chunk Documents for Full-Text Search")
     click.echo("=" * 60)
-    click.echo(f"Base URL: {base_url}")
     click.echo(f"Chunk size: {chunk_size} words")
     click.echo(f"Chunk overlap: {chunk_overlap} words")
-    click.echo(f"Output file: {output}")
+    click.echo(f"Output file: {output_path}")
     click.echo()
 
-    # Fetch all records
-    click.echo("Fetching records from InvenioRDM...")
-    api_url = f"{base_url.rstrip('/')}/api"
+    # Fetch all records using internal service
+    click.echo("Fetching records from InvenioRDM (internal service)...")
     records = []
-    url = f"{api_url}/records?size=100"
+    page = 1
+    size = 100
 
-    while url:
+    while True:
         try:
-            response = requests.get(url, verify=False)
-            response.raise_for_status()
-            data = response.json()
-            records.extend(data['hits']['hits'])
-            url = data['links'].get('next')
+            # Use internal service to search records
+            result = current_rdm_records_service.search(
+                identity=system_identity,
+                params={'size': size, 'page': page}
+            )
+
+            hits = list(result.hits)
+            if not hits:
+                break
+
+            records.extend(hits)
             click.echo(f"  Fetched {len(records)} records so far...")
+
+            # Check if there are more pages
+            if len(hits) < size:
+                break
+            page += 1
+
         except Exception as e:
             click.echo(f"Error fetching records: {e}")
             break
@@ -613,7 +647,6 @@ def chunk_documents_cmd(output, base_url):
     click.echo()
 
     # Process each record
-    output_path = Path(output)
     all_chunks = []
     successful = 0
     failed = 0
@@ -622,25 +655,32 @@ def chunk_documents_cmd(output, base_url):
         with click.progressbar(records, label='Processing records') as bar:
             for record in bar:
                 record_id = record['id']
-                title = record['metadata'].get('title', record_id)
+                title = record.get('metadata', {}).get('title', record_id)
 
-                # Download text file
-                files = record.get('files', {}).get('entries', {})
-                txt_files = {k: v for k, v in files.items() if k.endswith('.txt')}
+                # Get file entries
+                files_entries = record.get('files', {}).get('entries', {})
+                txt_files = {k: v for k, v in files_entries.items() if k.endswith('.txt')}
 
                 if not txt_files:
                     failed += 1
                     continue
 
                 filename = list(txt_files.keys())[0]
-                file_url = f"{api_url}/records/{record_id}/files/{filename}/content"
 
                 try:
-                    response = requests.get(file_url, verify=False)
-                    response.raise_for_status()
-                    text = response.text
+                    # Use internal service to read file content
+                    file_item = current_rdm_records_service.files.get_file_content(
+                        identity=system_identity,
+                        id_=record_id,
+                        file_key=filename
+                    )
+
+                    # Read file content using open_stream context manager
+                    with file_item.open_stream('rb') as stream:
+                        text = stream.read().decode('utf-8')
+
                 except Exception as e:
-                    click.echo(f"\n  Error downloading {title}: {e}")
+                    click.echo(f"\n  Error reading {title}: {e}")
                     failed += 1
                     continue
 
@@ -651,7 +691,7 @@ def chunk_documents_cmd(output, base_url):
                 chunks = _chunk_text(text, chunk_size, chunk_overlap)
 
                 # Get metadata
-                creators = record['metadata'].get('creators', [])
+                creators = record.get('metadata', {}).get('creators', [])
                 author = creators[0]['person_or_org']['name'] if creators else 'Unknown Author'
 
                 # Create chunk documents

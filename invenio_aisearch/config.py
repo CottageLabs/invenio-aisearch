@@ -28,3 +28,10 @@ INVENIO_AISEARCH_CHUNK_OVERLAP = 150
 
 INVENIO_AISEARCH_CHUNKS_ENABLED = False
 """Enable full-text search on document chunks (requires separate indexing)."""
+
+INVENIO_AISEARCH_DATA_DIR = "aisearch_data"
+"""Directory containing the document chunks JSONL file.
+Relative to instance path or absolute path."""
+
+INVENIO_AISEARCH_CHUNKS_FILE = "document_chunks.jsonl"
+"""Filename for the document chunks JSONL file (stored in DATA_DIR)."""

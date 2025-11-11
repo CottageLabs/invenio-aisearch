@@ -73,6 +73,16 @@ class ModelManager:
             print("✓ Summarizer model loaded")
         return self._summarizer
 
+    @property
+    def model_name(self) -> str:
+        """Get the embedding model name."""
+        return "sentence-transformers/all-MiniLM-L6-v2"
+
+    @property
+    def embedding_dim(self) -> int:
+        """Get the embedding dimension."""
+        return 384  # all-MiniLM-L6-v2 produces 384-dimensional vectors
+
     def generate_embedding(self, text: str):
         """Generate embedding for text.
 
@@ -83,6 +93,17 @@ class ModelManager:
             numpy array of embedding vector
         """
         return self.embedding_model.encode(text, convert_to_numpy=True)
+
+    def encode_batch(self, texts: list):
+        """Generate embeddings for a batch of texts.
+
+        Args:
+            texts: List of input texts
+
+        Returns:
+            numpy array of embedding vectors
+        """
+        return self.embedding_model.encode(texts, convert_to_numpy=True, show_progress_bar=False)
 
     def classify_intent(self, query: str, candidate_labels: list):
         """Classify query intent using zero-shot classification.

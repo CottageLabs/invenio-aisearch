@@ -15,3 +15,16 @@ INVENIO_AISEARCH_DEFAULT_LIMIT = 10
 
 INVENIO_AISEARCH_MAX_LIMIT = 100
 """Maximum number of search results allowed."""
+
+# Full-text search configuration
+INVENIO_AISEARCH_CHUNKS_INDEX = "document-chunks-v1"
+"""OpenSearch index name for document chunks."""
+
+INVENIO_AISEARCH_CHUNK_SIZE = 600
+"""Target chunk size in words for full-text search."""
+
+INVENIO_AISEARCH_CHUNK_OVERLAP = 150
+"""Overlap size in words between chunks."""
+
+INVENIO_AISEARCH_CHUNKS_ENABLED = False
+"""Enable full-text search on document chunks (requires separate indexing)."""

@@ -35,3 +35,12 @@ def similar(record_id):
         page_title=_("Similar Records"),
         record_id=record_id,
     )
+
+
+@blueprint.route("/aisearch/passages")
+def passages():
+    """Render the passage search interface."""
+    return render_template(
+        "invenio_aisearch/passages.html",
+        page_title=_("Passage Search"),
+    )

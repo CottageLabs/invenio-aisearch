@@ -311,6 +311,94 @@ class AISearchService:
             source_creators=source_creators,
         )
 
+    def search_passages(self, identity, query: str, limit: int = 10):
+        """Search document passages using AI-powered semantic search.
+
+        This searches through document chunks (passages) to find semantically
+        relevant text snippets that match the query. Perfect for questions like:
+        - "find passages where the protagonist makes an important decision"
+        - "show me where the main character embarks on their quest"
+
+        Args:
+            identity: User identity for access control
+            query: Natural language search query
+            limit: Maximum number of passages to return (default: 10)
+
+        Returns:
+            dict with passages and metadata
+        """
+        # Check if chunks feature is enabled
+        if not current_app.config.get('INVENIO_AISEARCH_CHUNKS_ENABLED', False):
+            current_app.logger.warning("Chunk search requested but CHUNKS_ENABLED is False")
+
+        # Generate query embedding
+        query_embedding = self.model_manager.generate_embedding(query)
+
+        # Get chunks index name
+        index_name = current_app.config.get('INVENIO_AISEARCH_CHUNKS_INDEX', 'document-chunks-v1')
+
+        # Apply limit constraints
+        max_limit = getattr(self.config, 'max_limit', 100)
+        result_limit = min(limit, max_limit)
+
+        # Build OpenSearch k-NN query for chunks
+        search_body = {
+            "size": result_limit,
+            "query": {
+                "knn": {
+                    "embedding": {
+                        "vector": query_embedding.tolist(),
+                        "k": result_limit
+                    }
+                }
+            },
+            "_source": {
+                "excludes": ["embedding"]  # Don't return the embedding vector
+            }
+        }
+
+        # Execute search
+        try:
+            response = current_search_client.search(
+                index=index_name,
+                body=search_body
+            )
+        except Exception as e:
+            current_app.logger.error(f"OpenSearch chunk k-NN query failed: {e}")
+            return {
+                'query': query,
+                'passages': [],
+                'total': 0,
+                'error': str(e)
+            }
+
+        # Parse results
+        passages = []
+        for hit in response['hits']['hits']:
+            source = hit['_source']
+
+            passage = {
+                'chunk_id': source.get('chunk_id'),
+                'record_id': source.get('record_id'),
+                'title': source.get('title', 'Untitled'),
+                'creators': source.get('creators', 'Unknown'),
+                'text': source.get('text', ''),
+                'chunk_index': source.get('chunk_index', 0),
+                'chunk_count': source.get('chunk_count', 0),
+                'word_count': source.get('word_count', 0),
+                'char_start': source.get('char_start', 0),
+                'char_end': source.get('char_end', 0),
+                'similarity_score': hit['_score'],  # k-NN similarity score
+            }
+
+            passages.append(passage)
+
+        return {
+            'query': query,
+            'passages': passages,
+            'total': len(passages),
+        }
+
     def status(self):
         """Get service status.
 

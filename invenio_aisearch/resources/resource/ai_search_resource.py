@@ -37,6 +37,7 @@ class AISearchResource(Resource):
             route("GET", self.config.routes["search"], self.search_get),
             route("POST", self.config.routes["search"], self.search_post),
             route("GET", self.config.routes["similar"], self.similar),
+            route("GET", self.config.routes["passages"], self.passages),
             route("GET", self.config.routes["status"], self.status),
         ]
 
@@ -155,6 +156,43 @@ class AISearchResource(Resource):
 
         except ValueError as e:
             return {"error": str(e)}, 404
+        except Exception as e:
+            return {"error": "Internal server error", "message": str(e)}, 500
+
+    @request_search_args
+    @response_handler()
+    def passages(self):
+        """Handle GET request for passage/chunk search.
+
+        Query parameters:
+            q or query: Natural language query string
+            limit: Maximum number of passages to return
+
+        Returns:
+            Matching passages as JSON
+        """
+        try:
+            # Get query parameters from args
+            args = resource_requestctx.args or {}
+
+            query = args.get('q') or args.get('query')
+            if not query:
+                raise BadRequest("Missing required parameter: 'q' or 'query'")
+
+            # Schema already converted types
+            limit = args.get('limit', 10)
+
+            # Perform passage search
+            result = self.service.search_passages(
+                identity=g.identity,
+                query=query,
+                limit=limit,
+            )
+
+            return result, 200
+
+        except ValueError as e:
+            return {"error": str(e)}, 503
         except Exception as e:
             return {"error": "Internal server error", "message": str(e)}, 500
 

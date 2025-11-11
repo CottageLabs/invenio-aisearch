@@ -32,6 +32,7 @@ class AISearchResourceConfig(ResourceConfig):
     routes = {
         "search": "/search",
         "similar": "/similar/<record_id>",
+        "passages": "/passages",
         "status": "/status",
     }
 

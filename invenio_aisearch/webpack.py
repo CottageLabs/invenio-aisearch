@@ -18,6 +18,7 @@ theme = WebpackThemeBundle(
             entry={
                 "invenio-aisearch-search": "./js/invenio_aisearch/search.js",
                 "invenio-aisearch-similar": "./js/invenio_aisearch/similar.js",
+                "invenio-aisearch-passages": "./js/invenio_aisearch/passages.js",
             },
         )
     },

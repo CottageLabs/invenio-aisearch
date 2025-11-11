@@ -17,6 +17,7 @@ theme = WebpackThemeBundle(
         "semantic-ui": dict(
             entry={
                 "invenio-aisearch-search": "./js/invenio_aisearch/search.js",
+                "invenio-aisearch-similar": "./js/invenio_aisearch/similar.js",
             },
         )
     },

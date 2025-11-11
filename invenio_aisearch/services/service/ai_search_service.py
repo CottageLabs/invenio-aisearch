@@ -181,7 +181,7 @@ class AISearchService:
                 body={
                     "query": {"term": {"id": record_id}},
                     "size": 1,
-                    "_source": ["aisearch.embedding", "metadata.title"]
+                    "_source": ["aisearch.embedding", "metadata.title", "metadata.creators"]
                 }
             )
 
@@ -194,7 +194,8 @@ class AISearchService:
                 )
 
             source_hit = search_response['hits']['hits'][0]
-            source_embedding = source_hit['_source'].get('aisearch', {}).get('embedding')
+            source_data = source_hit['_source']
+            source_embedding = source_data.get('aisearch', {}).get('embedding')
 
             if not source_embedding:
                 current_app.logger.error(f"Record {record_id} has no embedding")
@@ -203,6 +204,15 @@ class AISearchService:
                     similar=[],
                     total=0,
                 )
+
+            # Extract source record metadata
+            source_metadata = source_data.get('metadata', {})
+            source_title = source_metadata.get('title', 'Untitled')
+            source_creators_data = source_metadata.get('creators', [])
+            source_creators = [
+                creator.get('person_or_org', {}).get('name', 'Unknown')
+                for creator in source_creators_data
+            ]
 
         except Exception as e:
             current_app.logger.error(f"Failed to fetch source record {record_id}: {e}")
@@ -297,6 +307,8 @@ class AISearchService:
             record_id=record_id,
             similar=similar_records,
             total=len(similar_records),
+            source_title=source_title,
+            source_creators=source_creators,
         )
 
     def status(self):

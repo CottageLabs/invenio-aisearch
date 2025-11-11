@@ -25,3 +25,13 @@ def search():
         "invenio_aisearch/search.html",
         page_title=_("AI Search"),
     )
+
+
+@blueprint.route("/aisearch/similar/<record_id>")
+def similar(record_id):
+    """Render the similar records interface."""
+    return render_template(
+        "invenio_aisearch/similar.html",
+        page_title=_("Similar Records"),
+        record_id=record_id,
+    )

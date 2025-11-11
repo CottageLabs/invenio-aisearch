@@ -75,6 +75,8 @@ class SimilarResult:
         record_id: str,
         similar: List[Dict],
         total: int,
+        source_title: Optional[str] = None,
+        source_creators: Optional[List[str]] = None,
     ):
         """Initialize similar result.
 
@@ -82,10 +84,14 @@ class SimilarResult:
             record_id: Source record ID
             similar: List of similar records
             total: Total number of similar records
+            source_title: Title of the source record
+            source_creators: List of creator names for the source record
         """
         self._record_id = record_id
         self._similar = similar
         self._total = total
+        self._source_title = source_title
+        self._source_creators = source_creators or []
 
     @property
     def record_id(self) -> str:
@@ -102,17 +108,32 @@ class SimilarResult:
         """Get total number of similar records."""
         return self._total
 
+    @property
+    def source_title(self) -> Optional[str]:
+        """Get the source record title."""
+        return self._source_title
+
+    @property
+    def source_creators(self) -> List[str]:
+        """Get the source record creators."""
+        return self._source_creators
+
     def to_dict(self) -> Dict:
         """Convert to dictionary representation.
 
         Returns:
             Dictionary with similar records and metadata
         """
-        return {
+        result = {
             "record_id": self._record_id,
             "similar": self._similar,
             "total": self._total,
         }
+        if self._source_title:
+            result["source_title"] = self._source_title
+        if self._source_creators:
+            result["source_creators"] = self._source_creators
+        return result
 
 
 class StatusResult:

@@ -1,0 +1,74 @@
+{#
+  Copyright (C) 2025 Cottage Labs.
+
+  invenio-aisearch is free software; you can redistribute it and/or modify it
+  under the terms of the MIT License; see LICENSE file for more details.
+#}
+
+{%- extends config.INVENIO_AISEARCH_BASE_TEMPLATE %}
+
+{%- block page_body %}
+<div class="ui container" style="margin-top: 2em;">
+  <h1 class="ui header">
+    <i class="clone outline icon"></i>
+    <div class="content">
+      Similar Records
+      <div class="sub header">Records similar to <span id="source-record-id">{{ record_id }}</span></div>
+    </div>
+  </h1>
+
+  <div class="ui segment" id="source-record-info" style="display: none;">
+    <h3 class="ui header">Source Record</h3>
+    <div class="ui relaxed divided list">
+      <div class="item">
+        <div class="content">
+          <div class="header" id="source-title"></div>
+          <div class="description" id="source-creators"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="similar-results-container" style="display: none;">
+    <div class="ui segment">
+      <div id="similar-meta" class="ui horizontal list">
+        <div class="item">
+          <div class="content">
+            <div class="header" id="results-count">0 similar records</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="ui relaxed divided items" id="similar-results">
+      <!-- Results will be inserted here -->
+    </div>
+  </div>
+
+  <div id="loading-indicator" class="ui segment">
+    <div class="ui active inverted dimmer">
+      <div class="ui text loader">Finding similar records...</div>
+    </div>
+    <p style="visibility: hidden;">Loading placeholder</p>
+  </div>
+
+  <div id="error-message" style="display: none;" class="ui negative message">
+    <i class="close icon"></i>
+    <div class="header">Error</div>
+    <p id="error-text"></p>
+  </div>
+
+  <div id="no-results" style="display: none;" class="ui icon message">
+    <i class="search icon"></i>
+    <div class="content">
+      <div class="header">No similar records found</div>
+      <p>Could not find any records similar to this one.</p>
+    </div>
+  </div>
+</div>
+{%- endblock page_body %}
+
+{%- block javascript %}
+{{ super() }}
+{{ webpack['invenio-aisearch-similar.js'] }}
+{%- endblock javascript %}

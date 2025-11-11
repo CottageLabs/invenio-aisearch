@@ -55,6 +55,16 @@ class AISearchService:
         max_limit = getattr(self.config, 'max_limit', 100)
         result_limit = min(result_limit, max_limit)
 
+        # Determine if passages will be used for boosting
+        should_include_passages = include_passages if include_passages is not None else current_app.config.get('INVENIO_AISEARCH_CHUNKS_ENABLED', False)
+
+        # If passages enabled, fetch MORE books initially so we can re-rank based on passage evidence
+        # Otherwise, books ranked 11+ by metadata alone would never get boosted
+        if should_include_passages:
+            initial_book_limit = min(result_limit * 5, max_limit)  # Fetch 5x more books for re-ranking
+        else:
+            initial_book_limit = result_limit
+
         # Get index name from RDM records with prefix
         prefix = current_app.config.get('SEARCH_INDEX_PREFIX', '')
         base_index_name = RDMRecord.index._name
@@ -62,12 +72,12 @@ class AISearchService:
 
         # Build OpenSearch k-NN query
         search_body = {
-            "size": result_limit,
+            "size": initial_book_limit,
             "query": {
                 "knn": {
                     "aisearch.embedding": {
                         "vector": query_embedding.tolist(),
-                        "k": result_limit
+                        "k": initial_book_limit
                     }
                 }
             },
@@ -92,8 +102,10 @@ class AISearchService:
                 total=0,
             )
 
-        # Parse results
+        # Parse results with deduplication (will be re-ranked later based on passages)
         results = []
+        seen_works = set()  # Track (title, primary_author) to deduplicate
+
         for hit in response['hits']['hits']:
             source = hit['_source']
             metadata = source.get('metadata', {})
@@ -104,6 +116,22 @@ class AISearchService:
                 creator.get('person_or_org', {}).get('name', 'Unknown')
                 for creator in creators
             ]
+
+            # Extract title for deduplication
+            title = metadata.get('title', 'Untitled')
+            primary_author = creator_names[0] if creator_names else 'Unknown'
+
+            # Create deduplication key (normalized title + primary author)
+            # Normalize by removing subtitles and punctuation for better matching
+            normalized_title = title.split(':')[0].split(';')[0].strip().lower()
+            dedup_key = (normalized_title, primary_author.lower())
+
+            # Skip if we've already seen this work
+            if dedup_key in seen_works:
+                current_app.logger.debug(f"Skipping duplicate: {title} by {primary_author}")
+                continue
+
+            seen_works.add(dedup_key)
 
             # Extract resource type
             resource_type = metadata.get('resource_type', {})
@@ -119,61 +147,47 @@ class AISearchService:
             access = source.get('access', {})
             access_status = access.get('record', 'restricted')
 
-            # Build result item
+            # Build result item (without summary yet - will add after re-ranking)
             result = {
                 'record_id': source.get('id'),  # Use PID, not internal UUID
-                'title': metadata.get('title', 'Untitled'),
+                'title': title,
                 'creators': creator_names,
                 'publication_date': metadata.get('publication_date', ''),
                 'resource_type': resource_type_title,
                 'license': license_title,
                 'access_status': access_status,
                 'similarity_score': hit['_score'],  # k-NN cosine similarity score
+                # Store description for later summary generation
+                '_description': metadata.get('description', ''),
             }
-
-            # Add summary if requested
-            if include_summaries and getattr(self.config, 'enable_summaries', True):
-                description = metadata.get('description')
-                if description:
-                    if len(description) > 500:
-                        # Generate summary for long descriptions
-                        summary = self.model_manager.generate_summary(
-                            description,
-                            max_length=getattr(self.config, 'summary_max_length', 150),
-                            min_length=getattr(self.config, 'summary_min_length', 50)
-                        )
-                        result['summary'] = summary
-                    else:
-                        result['summary'] = description
-                else:
-                    # Fallback: use title
-                    result['summary'] = result['title']
 
             results.append(result)
 
-        # Optionally include passage-level results
+        # Optionally include passage-level results and boost book scores
         passages = []
         passage_total = 0
+        passage_boosts = {}  # Maps record_id -> boost score
+        all_passages_data = {}  # Maps record_id -> sorted list of passages
 
-        # Determine if we should include passages
-        should_include_passages = include_passages if include_passages is not None else current_app.config.get('INVENIO_AISEARCH_CHUNKS_ENABLED', False)
+        # Note: should_include_passages already determined above for initial_book_limit calculation
 
         if should_include_passages:
             try:
                 # Get chunks index name
                 chunks_index = current_app.config.get('INVENIO_AISEARCH_CHUNKS_INDEX', 'document-chunks-v1')
 
-                # Limit passages to a reasonable number (max 5 per query)
-                passage_limit = min(5, result_limit)
+                # Search for MORE passages to get better book-level signals
+                # We'll use these to boost book rankings based on passage match strength
+                passage_search_limit = min(100, result_limit * 10)
 
                 # Build OpenSearch k-NN query for chunks
                 chunks_search_body = {
-                    "size": passage_limit,
+                    "size": passage_search_limit,
                     "query": {
                         "knn": {
                             "embedding": {
                                 "vector": query_embedding.tolist(),
-                                "k": passage_limit
+                                "k": passage_search_limit
                             }
                         }
                     },
@@ -188,13 +202,19 @@ class AISearchService:
                     body=chunks_search_body
                 )
 
-                # Parse passage results
+                # Parse passage results and calculate per-book aggregates
+                passages_by_record = {}  # Maps record_id -> list of passages
+
                 for hit in chunks_response['hits']['hits']:
                     source = hit['_source']
+                    record_id = source.get('record_id')
+
+                    if not record_id:
+                        continue
 
                     passage = {
                         'chunk_id': source.get('chunk_id'),
-                        'record_id': source.get('record_id'),
+                        'record_id': record_id,
                         'title': source.get('title', 'Untitled'),
                         'creators': source.get('creators', 'Unknown'),
                         'text': source.get('text', ''),
@@ -206,15 +226,118 @@ class AISearchService:
                         'similarity_score': hit['_score'],  # k-NN similarity score
                     }
 
-                    passages.append(passage)
+                    if record_id not in passages_by_record:
+                        passages_by_record[record_id] = []
+                    passages_by_record[record_id].append(passage)
 
-                passage_total = len(passages)
+                # Calculate passage boost for each book
+                # Boost = (max_passage_score * 0.5) + (avg_top3_scores * 0.3) + (num_passages * 0.01)
+                for record_id, record_passages in passages_by_record.items():
+                    scores = [p['similarity_score'] for p in record_passages]
+                    max_score = max(scores)
+                    top3_avg = sum(sorted(scores, reverse=True)[:3]) / min(3, len(scores))
+                    count_bonus = min(len(scores) * 0.01, 0.1)  # Cap at 0.1
+
+                    boost = (max_score * 0.5) + (top3_avg * 0.3) + count_bonus
+                    passage_boosts[record_id] = boost
+
+                # Keep passages for display - ensure each book gets represented
+                # Strategy: For each book that will be in final results, include its top passages
+                # This is done AFTER re-ranking, so we'll collect passages here but filter them later
+                passages_by_record_sorted = {}
+                for record_id, record_passages in passages_by_record.items():
+                    # Sort passages for this book by score
+                    sorted_passages = sorted(record_passages, key=lambda p: p['similarity_score'], reverse=True)
+                    passages_by_record_sorted[record_id] = sorted_passages
+
+                # We'll filter these after re-ranking to only show passages for displayed books
+                # Store all passage data for later filtering
+                all_passages_data = passages_by_record_sorted
 
             except Exception as e:
                 current_app.logger.error(f"Passage search failed: {e}")
                 # Don't fail the whole search if passages fail
                 passages = []
                 passage_total = 0
+                passage_boosts = {}
+                all_passages_data = {}
+
+        # Re-rank book results based on passage boosts (if any)
+        if passage_boosts:
+            # Apply passage boost to each book's score
+            # Combined score = (book_score * 0.4) + (passage_boost * 0.6)
+            # This gives passage evidence more weight since it's from actual content
+            for result in results:
+                record_id = result['record_id']
+                original_score = result['similarity_score']
+
+                if record_id in passage_boosts:
+                    passage_boost = passage_boosts[record_id]
+                    # Weighted combination: favor passage evidence
+                    boosted_score = (original_score * 0.4) + (passage_boost * 0.6)
+                    result['boosted_score'] = boosted_score
+                    result['original_book_score'] = original_score
+                    result['passage_boost'] = passage_boost
+                else:
+                    # No passage boost - use original score
+                    result['boosted_score'] = original_score
+                    result['original_book_score'] = original_score
+                    result['passage_boost'] = None
+
+            # Re-sort results by boosted score
+            results.sort(key=lambda r: r['boosted_score'], reverse=True)
+
+            # Update similarity_score to show the boosted score in results
+            for result in results:
+                result['similarity_score'] = result['boosted_score']
+
+            # Trim to requested limit after re-ranking
+            results = results[:result_limit]
+        else:
+            # No passage boosting - trim to limit now
+            results = results[:result_limit]
+
+        # Filter passages to only include those from displayed books
+        if all_passages_data:
+            # Get record IDs of final displayed books
+            displayed_record_ids = {r['record_id'] for r in results}
+
+            # For each displayed book, include its top passages (max 3 per book)
+            max_passages_per_book = 3
+            passages = []
+
+            for record_id in displayed_record_ids:
+                if record_id in all_passages_data:
+                    book_passages = all_passages_data[record_id][:max_passages_per_book]
+                    passages.extend(book_passages)
+
+            # Sort passages by score for display
+            passages.sort(key=lambda p: p['similarity_score'], reverse=True)
+            passage_total = len(passages)
+
+        # Generate summaries ONLY for final displayed results (if requested)
+        if include_summaries and getattr(self.config, 'enable_summaries', True):
+            for result in results:
+                description = result.pop('_description', '')  # Remove temp field
+                if description:
+                    if len(description) > 500:
+                        # Generate AI summary for long descriptions
+                        summary = self.model_manager.generate_summary(
+                            description,
+                            max_length=getattr(self.config, 'summary_max_length', 150),
+                            min_length=getattr(self.config, 'summary_min_length', 50)
+                        )
+                        result['summary'] = summary
+                    else:
+                        # Short description - use as-is
+                        result['summary'] = description
+                else:
+                    # Fallback: use title
+                    result['summary'] = result['title']
+        else:
+            # Summaries not requested - clean up temp field
+            for result in results:
+                result.pop('_description', None)
 
         # Return results with passages if available
         return SearchResult(

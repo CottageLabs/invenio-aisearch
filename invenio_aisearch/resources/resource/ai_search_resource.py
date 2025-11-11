@@ -50,6 +50,7 @@ class AISearchResource(Resource):
             q or query: Natural language query string
             limit: Maximum number of results
             summaries: Whether to include AI summaries (true/false)
+            passages: Whether to include passage results (true/false)
 
         Returns:
             Search results as JSON
@@ -65,6 +66,7 @@ class AISearchResource(Resource):
             # Schema already converted types, just extract values
             limit = args.get('limit')
             summaries = args.get('summaries', False)
+            passages = args.get('passages')  # None = use config default, True/False = override
 
             # Perform search using OpenSearch k-NN
             result = self.service.search(
@@ -72,6 +74,7 @@ class AISearchResource(Resource):
                 query=query,
                 limit=limit,
                 include_summaries=summaries,
+                include_passages=passages,
             )
 
             return result.to_dict(), 200
@@ -90,6 +93,7 @@ class AISearchResource(Resource):
             q or query: Natural language query string
             limit: Maximum number of results
             summaries: Whether to include AI summaries
+            passages: Whether to include passage results
 
         Returns:
             Search results as JSON
@@ -111,6 +115,7 @@ class AISearchResource(Resource):
                 query=query,
                 limit=data.get('limit'),
                 include_summaries=data.get('summaries', False),
+                include_passages=data.get('passages'),  # None = use config default
             )
 
             return result.to_dict(), 200

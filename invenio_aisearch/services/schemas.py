@@ -22,6 +22,7 @@ class SearchRequestSchema(MultiDictSchema):
         validate=validate.Range(min=1, max=100)
     )
     summaries = fields.Bool(required=False, missing=False)
+    passages = fields.Bool(required=False, allow_none=True)  # None = use config default
 
     @validates_schema
     def validate_query(self, data, **kwargs):

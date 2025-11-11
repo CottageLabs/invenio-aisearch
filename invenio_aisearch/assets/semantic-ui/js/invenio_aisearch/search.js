@@ -43,9 +43,10 @@
 
       const query = document.getElementById('search-query').value.trim();
       const includeSummaries = document.getElementById('include-summaries').checked;
+      const includePassages = document.getElementById('include-passages').checked;
       const limit = document.getElementById('results-limit').value;
 
-      console.log('AI Search: Query:', query, 'Summaries:', includeSummaries, 'Limit:', limit);
+      console.log('AI Search: Query:', query, 'Summaries:', includeSummaries, 'Passages:', includePassages, 'Limit:', limit);
 
       if (!query) {
         return;
@@ -64,7 +65,8 @@
         const params = new URLSearchParams({
           q: query,
           limit: limit,
-          summaries: includeSummaries
+          summaries: includeSummaries,
+          passages: includePassages
         });
 
         const apiUrl = `/api/aisearch/search?${params}`;
@@ -195,13 +197,35 @@
             `;
           }
 
-          // Score label
+          // Score label with boosting information
           html += `
-            <div class="extra" style="margin-top: 0.5em;">
+            <div class="extra" style="margin-top: 0.5em;">`;
+
+          // Show boost details if available
+          if (result.passage_boost !== undefined && result.passage_boost !== null) {
+            html += `
+              <span class="ui small blue label" title="Original book-level similarity score">
+                <i class="book icon"></i>
+                Book score: ${result.original_book_score.toFixed(3)}
+              </span>
+              <span class="ui small teal label" title="Boost from matching passages">
+                <i class="arrow up icon"></i>
+                Passage boost: ${result.passage_boost.toFixed(3)}
+              </span>
+              <span class="ui small green label" title="Final combined score">
+                <i class="chart line icon"></i>
+                Final: ${result.similarity_score.toFixed(3)}
+              </span>`;
+          } else {
+            // No boosting - just show single score
+            html += `
               <span class="ui small primary label">
                 <i class="chart line icon"></i>
-                Book similarity: ${result.similarity_score.toFixed(3)}
-              </span>
+                Similarity: ${result.similarity_score.toFixed(3)}
+              </span>`;
+          }
+
+          html += `
             </div>
           `;
 

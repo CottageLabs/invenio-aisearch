@@ -780,3 +780,228 @@ def _chunk_text(text: str, chunk_size: int, overlap: int):
         chunks.append((chunk_text, start_char, end_char))
 
     return chunks
+
+
+@aisearch.command("explain-similarity")
+@click.argument("record_id_1")
+@click.argument("record_id_2")
+@click.option("--num-passages", default=5, help="Number of top passage pairs to analyze")
+@with_appcontext
+def explain_similarity_cmd(record_id_1, record_id_2, num_passages):
+    """Explain why two books are semantically similar.
+
+    Analyzes passage-level similarity between two books and extracts
+    common themes, topics, and keywords from the most similar passages.
+
+    Example:
+        invenio aisearch explain-similarity abcd-1234 efgh-5678
+        invenio aisearch explain-similarity abcd-1234 efgh-5678 --num-passages 10
+    """
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from collections import Counter
+    import numpy as np
+
+    click.echo("=" * 60)
+    click.echo("Semantic Similarity Analysis")
+    click.echo("=" * 60)
+
+    # Get chunks index name
+    chunks_index = current_app.config.get('INVENIO_AISEARCH_CHUNKS_INDEX', 'document-chunks-v1')
+
+    # Check if chunks index exists
+    if not current_search_client.indices.exists(index=chunks_index):
+        click.echo(f"✗ Chunks index '{chunks_index}' does not exist")
+        click.echo("Create it with: invenio aisearch create-chunks-index")
+        return
+
+    # Check if model is loaded
+    ext = current_app.extensions.get("invenio-aisearch")
+    if not ext or not ext.model_manager:
+        click.echo("✗ AI search extension not initialized")
+        return
+
+    try:
+        # Fetch metadata for both books
+        click.echo(f"\nFetching book metadata...")
+
+        book1_result = current_rdm_records_service.read(
+            identity=system_identity,
+            id_=record_id_1
+        )
+        book1 = book1_result.to_dict()
+        book1_title = book1.get('metadata', {}).get('title', record_id_1)
+        book1_creators = book1.get('metadata', {}).get('creators', [])
+        book1_author = book1_creators[0]['person_or_org']['name'] if book1_creators else 'Unknown'
+
+        book2_result = current_rdm_records_service.read(
+            identity=system_identity,
+            id_=record_id_2
+        )
+        book2 = book2_result.to_dict()
+        book2_title = book2.get('metadata', {}).get('title', record_id_2)
+        book2_creators = book2.get('metadata', {}).get('creators', [])
+        book2_author = book2_creators[0]['person_or_org']['name'] if book2_creators else 'Unknown'
+
+        click.echo(f"\nBook 1: {book1_title}")
+        click.echo(f"  Author: {book1_author}")
+        click.echo(f"  ID: {record_id_1}")
+
+        click.echo(f"\nBook 2: {book2_title}")
+        click.echo(f"  Author: {book2_author}")
+        click.echo(f"  ID: {record_id_2}")
+
+        # Fetch all passages for both books
+        click.echo(f"\nFetching passages from chunks index...")
+
+        book1_passages = _fetch_all_passages(record_id_1, chunks_index)
+        book2_passages = _fetch_all_passages(record_id_2, chunks_index)
+
+        if not book1_passages:
+            click.echo(f"✗ No passages found for book 1")
+            return
+        if not book2_passages:
+            click.echo(f"✗ No passages found for book 2")
+            return
+
+        click.echo(f"  Book 1: {len(book1_passages)} passages")
+        click.echo(f"  Book 2: {len(book2_passages)} passages")
+
+        # Calculate pairwise similarities
+        click.echo(f"\nCalculating passage-level similarities...")
+
+        similar_pairs = []
+        for p1 in book1_passages:
+            for p2 in book2_passages:
+                # Cosine similarity between embeddings
+                emb1 = np.array(p1['embedding'])
+                emb2 = np.array(p2['embedding'])
+                similarity = np.dot(emb1, emb2) / (np.linalg.norm(emb1) * np.linalg.norm(emb2))
+
+                similar_pairs.append({
+                    'similarity': similarity,
+                    'passage1': p1,
+                    'passage2': p2
+                })
+
+        # Sort by similarity and take top N
+        similar_pairs.sort(key=lambda x: x['similarity'], reverse=True)
+        top_pairs = similar_pairs[:num_passages]
+
+        click.echo(f"  Found {len(similar_pairs)} passage pairs")
+        click.echo(f"  Analyzing top {len(top_pairs)} pairs")
+
+        # Extract themes from top matching passages
+        click.echo(f"\n{'=' * 60}")
+        click.echo("Theme Analysis")
+        click.echo("=" * 60)
+
+        # Combine text from top matching passages
+        combined_texts = []
+        for pair in top_pairs:
+            combined_texts.append(pair['passage1']['text'])
+            combined_texts.append(pair['passage2']['text'])
+
+        # Extract key terms using TF-IDF
+        click.echo("\nExtracting key themes using TF-IDF...")
+
+        vectorizer = TfidfVectorizer(
+            max_features=30,
+            stop_words='english',
+            ngram_range=(1, 2),  # Unigrams and bigrams
+            min_df=2  # Must appear in at least 2 passages
+        )
+
+        try:
+            tfidf_matrix = vectorizer.fit_transform(combined_texts)
+            feature_names = vectorizer.get_feature_names_out()
+
+            # Get average TF-IDF scores across all passages
+            avg_scores = np.mean(tfidf_matrix.toarray(), axis=0)
+            top_indices = avg_scores.argsort()[-15:][::-1]
+
+            click.echo("\n🔑 Key Shared Themes/Topics:")
+            for idx in top_indices:
+                if avg_scores[idx] > 0:
+                    click.echo(f"  • {feature_names[idx]} (relevance: {avg_scores[idx]:.3f})")
+
+        except Exception as e:
+            click.echo(f"  Note: Could not extract themes (too few passages or low overlap)")
+
+        # Show top matching passage pairs
+        click.echo(f"\n{'=' * 60}")
+        click.echo("Top Matching Passage Pairs")
+        click.echo("=" * 60)
+
+        for i, pair in enumerate(top_pairs[:3], 1):  # Show top 3 pairs in detail
+            click.echo(f"\n{i}. Similarity Score: {pair['similarity']:.3f}")
+            click.echo(f"\n   From '{book1_title}' (chunk {pair['passage1']['chunk_index'] + 1}/{pair['passage1']['chunk_count']}):")
+            passage1_preview = pair['passage1']['text'][:400] + "..." if len(pair['passage1']['text']) > 400 else pair['passage1']['text']
+            click.echo(f"   {passage1_preview}")
+
+            click.echo(f"\n   From '{book2_title}' (chunk {pair['passage2']['chunk_index'] + 1}/{pair['passage2']['chunk_count']}):")
+            passage2_preview = pair['passage2']['text'][:400] + "..." if len(pair['passage2']['text']) > 400 else pair['passage2']['text']
+            click.echo(f"   {passage2_preview}")
+            click.echo()
+
+        # Calculate overall book similarity
+        click.echo(f"\n{'=' * 60}")
+        click.echo("Overall Similarity")
+        click.echo("=" * 60)
+
+        # Average of top passage similarities
+        avg_top_similarity = np.mean([p['similarity'] for p in top_pairs])
+        click.echo(f"\nAverage similarity of top {len(top_pairs)} passage pairs: {avg_top_similarity:.3f}")
+
+        # Distribution of similarities
+        all_similarities = [p['similarity'] for p in similar_pairs]
+        click.echo(f"Median passage similarity: {np.median(all_similarities):.3f}")
+        click.echo(f"Max passage similarity: {np.max(all_similarities):.3f}")
+        click.echo(f"Min passage similarity: {np.min(all_similarities):.3f}")
+
+        # Interpretation
+        click.echo("\n📊 Interpretation:")
+        if avg_top_similarity > 0.8:
+            click.echo("  Very high similarity - these books share very similar content and themes")
+        elif avg_top_similarity > 0.7:
+            click.echo("  High similarity - these books share significant thematic overlap")
+        elif avg_top_similarity > 0.6:
+            click.echo("  Moderate similarity - these books have some shared themes or topics")
+        elif avg_top_similarity > 0.5:
+            click.echo("  Low-moderate similarity - these books have limited thematic overlap")
+        else:
+            click.echo("  Low similarity - these books have minimal thematic connection")
+
+    except Exception as e:
+        click.echo(f"\n✗ Error: {e}")
+        import traceback
+        traceback.print_exc()
+
+    click.echo("\n" + "=" * 60)
+
+
+def _fetch_all_passages(record_id: str, index_name: str):
+    """Fetch all passage chunks for a given record."""
+    passages = []
+
+    query = {
+        "query": {
+            "term": {
+                "record_id": record_id
+            }
+        },
+        "size": 1000,  # Assume no book has more than 1000 chunks
+        "_source": ["chunk_id", "text", "chunk_index", "chunk_count", "word_count", "embedding"]
+    }
+
+    try:
+        response = current_search_client.search(index=index_name, body=query)
+
+        for hit in response['hits']['hits']:
+            source = hit['_source']
+            passages.append(source)
+
+        return passages
+
+    except Exception as e:
+        click.echo(f"Error fetching passages: {e}")
+        return []
